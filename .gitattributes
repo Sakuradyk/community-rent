@@ -1,0 +1,15 @@
+# 统一换行：仓库内一律 LF，避免 Windows 下 CRLF/LF 混用导致 SQL、yml 出现幽灵 diff
+* text=auto eol=lf
+
+# 二进制，不做换行转换
+*.zip   binary
+*.jar   binary
+*.png   binary
+*.jpg   binary
+*.xlsx  binary
+*.docx  binary
+
+# Windows 脚本保留 CRLF
+*.cmd   text eol=crlf
+*.bat   text eol=crlf
+*.ps1   text eol=crlf
