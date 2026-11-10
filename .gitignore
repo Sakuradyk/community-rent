@@ -1,0 +1,46 @@
+# ---------- Java / Maven ----------
+target/
+!.mvn/wrapper/maven-wrapper.jar
+*.class
+*.jar
+*.war
+*.ear
+
+# ---------- IDE ----------
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+
+# ---------- 前端 ----------
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+pnpm-debug.log*
+npm-debug.log*
+yarn-error.log*
+
+# ---------- 运行时 ----------
+logs/
+*.log
+uploads/
+temp/
+
+# ---------- 本地配置（敏感） ----------
+application-local.yml
+application-local.yaml
+application-prod.yml
+.env
+.env.local
+
+# ---------- 系统 ----------
+.DS_Store
+Thumbs.db
+desktop.ini
