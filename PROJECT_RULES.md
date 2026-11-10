@@ -18,7 +18,7 @@
 
 > 本文件 600+ 行，长文档越靠后越容易被略读，而最容易出错的 §8、§14 恰在末尾。以下 12 条是**不可跳过**的部分；本节与后文冲突时，以本节为准，并**立即指出矛盾**而不是二选一执行。
 
-1. **K2 三层不许删层**：应用层预检 → Redis 锁 → 唯一索引兜底，缺一层即错（§8.3）。
+1. **K2 三层不许删层**：应用层预检 → Redis 锁 → 唯一索引兜底，缺一层即错；**抢锁失败对外必须报 4090，不许漏成 5003**（§8.3）。
 2. **锁在事务外，释放在提交后**：加锁方法**不标** `@Transactional`；解锁必须等事务 `afterCompletion`（§8.3）。
 3. **占用必须逐日展开**：跨 3 天的订单在 `order_occupancy` 插 **3 行**，不是 1 行（§8.3）。
 4. **金额只用 `BigDecimal` + `DECIMAL(10,2)`**，比较用 `compareTo`，禁止 `double`/`float`（§6）。
@@ -463,7 +463,7 @@ Result<T> { int code; String message; T data; String traceId; }
 | `3xxx` | 状态机/权益 | `3001 ORDER_STATE_INVALID`、`3002 CREDIT_NOT_ENOUGH`、`3003 ITEM_STATUS_INVALID`、`3004 ITEM_NOT_FOUND`、`3005 ORDER_NOT_FOUND`、`3006 SELF_RENT_FORBIDDEN`、`3007 ITEM_AUDIT_PENDING`、`3008 PERMISSION_DENIED_FOR_RESOURCE`、`3009 APPEAL_STATE_INVALID` |
 | `4xxx` | 费用 | `4001 FEE_OUT_OF_RANGE`、`4002 DEPOSIT_INVALID`、`4003 SETTLEMENT_ALREADY_DONE`、`4004 LOSS_RATIO_INVALID` |
 | `4090` | **时段冲突**（`4xxx` 段的显式豁免单号，压测断言依赖此固定值） | `4090 OCCUPANCY_CONFLICT` |
-| `5xxx` | 系统/基础设施 | `5000 SYSTEM_ERROR`、`5001 DB_ERROR`、`5002 CACHE_ERROR`、`5003 LOCK_ACQUIRE_FAILED`、`5004 REMOTE_CALL_ERROR` |
+| `5xxx` | 系统/基础设施（**内部诊断用，不下发给终端用户**） | `5000 SYSTEM_ERROR`、`5001 DB_ERROR`、`5002 CACHE_ERROR`、`5003 LOCK_ACQUIRE_FAILED`（仅日志/定时任务，下单接口必须转 4090，见 §8.3）、`5004 REMOTE_CALL_ERROR` |
 
 > **关于 4090 的规则豁免**：本表规定 `4xxx` = 费用，而 `4090` 表示时段冲突，属**唯一一处显式例外**。原因：K2 压测脚本与前端 F7 都硬编码断言 `4090`，语义改成「费用类」反而会让「时段冲突」被当成金额问题提示用户。除此之外**不得**再出现跨段位编号；要加新码只能在本表已有码后面递增。
 
@@ -550,6 +550,32 @@ public Long createOrder(OrderCreateDTO dto) {
 **前提 3：预检结果不可信，只是「省钱」，不是「安全」。**
 预检失败就直接拒（省一次锁 + 一次事务）；预检通过也只是**允许进入**加锁与事务，最终裁决权在唯一索引。三层任何一层被写成「if 判断了就返回成功」，都算 K2 失败。
 
+#### 错误码口径：**锁失败不许漏成 5003**（K2 压测断言依赖此条）
+
+用户视角里不存在「锁」，只有「这个时段能不能租」。因此**抢锁失败必须对用户伪装成业务冲突**：
+
+```
+抢锁（SET NX PX）失败
+  → 500ms 内轮询重试：每 50ms 再试 NX，最多 10 次（总预算 ≤500ms）
+  → 期间抢到：正常走事务
+  → 预算耗尽仍失败：抛 BizException(OCCUPANCY_CONFLICT) 即 4090，附带冲突日期与候选时段
+```
+
+- `5003 LOCK_ACQUIRE_FAILED` **只用于**内部诊断日志与非用户路径（定时任务、补偿任务），**禁止**作为下单接口的对外返回码。
+- 禁止「锁失败即返回 5003」——前端只会弹「系统繁忙」，用户永远不知道该换个日期，K2 的验收观感直接崩。
+- 禁止「锁失败直接 sleep 重试无限次」——会把 Tomcat 线程池耗尽，比冲突严重得多。预算 500ms 是硬上限。
+
+**压测断言（写进 `docs/测试用例.md`，W7 交付物）**：同一 item、同一时段、50 线程并发下单 →
+
+| 断言项 | 期望值 |
+| :-- | :-- |
+| `code == 0` 的响应数 | **恰好 1** |
+| `code == 4090` 的响应数 | **49** |
+| `code == 5003 / 5000` 的响应数 | **0** |
+| `SELECT COUNT(*) FROM order_occupancy WHERE item_id=? AND occupy_date IN (...)` | 等于该订单天数，无重复行 |
+
+50 个响应里出现任何 `5003` 或 `5000`，说明前提 2（锁在事务外）或本节的重试口径没做到，压测不算通过。
+
 **禁止的「简化」**（交了就是错误）：
 
 - ❌ 只用 `SELECT ... WHERE` 判断后插入
@@ -559,6 +585,7 @@ public Long createOrder(OrderCreateDTO dto) {
 - ❌ `order_occupancy` 一笔订单只插一行、或先删后插（删除窗口内并发照样穿透）
 - ❌ 在事务内 `unlock`（见前提 2）
 - ❌ 捕获 `DuplicateKeyException` 后 `printStackTrace` 返回 500（必须转 4090 并带冲突日期）
+- ❌ 锁失败直接透出 `5003`、或无限重试
 
 ---
 
@@ -622,7 +649,7 @@ public Long createOrder(OrderCreateDTO dto) {
   - 押金 − 逾期费 − 损耗费 < 0 → 待补缴
   - 信誉分 100 封顶 / 0 下限 / 一天多单只加 4 分
   - 结算幂等：连调两次返回同一 `settle_no`
-- 并发验证：`CountDownLatch` + 线程池 50 线程打同一时段，断言成功订单数 == 1。
+- 并发验证：`CountDownLatch` + 线程池 50 线程打同一时段，断言**成功订单数 == 1**，且另外 49 个响应**全部是 `4090`**、没有 `5003`/`5000`（口径见 §8.3），并校验 `order_occupancy` 无重复行。
 
 ---
 
@@ -745,4 +772,5 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-10 | 项目负责人 | v1.1：§14 提交门槛由「能编译即可」升级为**两档制**（`wip` 检查点 / 正式提交须过 G1+G2+G3），新增 §14.3 提交前自检清单，§13 增第 11、12 条（提交前报闸门结果、不许虚报测试通过） |
 | 2026-11-10 | 项目负责人 | v1.2：①§2 连接池由 HikariCP 改为 **Druid 1.2.23**（`druid-spring-boot-3-starter`），新增 §4.8 Druid 配置契约 D1–D9；②补齐前端架构 §4.4 两个独立 Vite 应用目录、§4.5 前端分层职责、§4.6 前端硬性规则 F1–F14、§4.7 两端页面清单与 FR 映射 |
 | 2026-11-10 | 项目负责人 | v1.2（续）：§3 环境表更新——Maven 3.9.9 已安装至 `C:\dev\apache-maven-3.9.9`（`MAVEN_HOME` + 用户 `Path` 已配），新增 Maven 镜像与 GBK 编码两行备注 |
-| 2026-11-10 | 项目负责人 | **v1.3（外部审查后修订，12 条）**：①新增 §0「铁律 12 条」摘要页；②§1「三者」改「四者」；③§2 MyBatis-Plus 由「3.5.5+」锁定为 **3.5.7** 并注明 3.5.9+ 需 `mybatis-plus-jsqlparser`；④§2 Redis 由「7.x」改为实测 **5.0.14.1** 并标注命令集限制；⑤§2 补 `dayjs`/`sass`/`unplugin-*` 三行，§2.1 增「已获批例外」；⑥§4.1 目录树重画（`src/main/resources` 与 `src/main/java` 同级，原缩进会被照建成错结构）；⑦§7.2 错误码表与已实现 `ErrorCode` 枚举对齐并加 4090 豁免说明；⑧§8.3 补三条前提——**逐日展开**、**锁在事务外/提交后释放**、预检不可信；⑨§9 去掉不可用的 `@RefreshScope`，改为 `@ConfigurationProperties` + 快照 + 管理端刷新 + 60s 定时兜底；⑩新增 D10（`characterEncoding=UTF-8`）并同步 §6.4；⑪§7.1 `PageResult` 字段名与实现对齐（`list`） |
+| 2026-11-10 | 项目负责人 | **v1.3（外部审查后修订，12 条）**：①新增 §0 「铁律 12 条」摘要页；②§1「三者」改「四者」；③§2 MyBatis-Plus 由「3.5.5+」锁定为 **3.5.7** 并注明 3.5.9+ 需 `mybatis-plus-jsqlparser`；④§2 Redis 由「7.x」改为实测 **5.0.14.1** 并标注命令集限制；⑤§2 补 `dayjs`/`sass`/`unplugin-*` 三行，§2.1 增「已获批例外」；⑥§4.1 目录树重画（`src/main/resources` 与 `src/main/java` 同级，原缩进会被照建成错结构）；⑦§7.2 错误码表与已实现 `ErrorCode` 枚举对齐并加 4090 豁免说明；⑧§8.3 补三条前提——**逐日展开**、**锁在事务外/提交后释放**、预检不可信；⑨§9 去掉不可用的 `@RefreshScope`，改为 `@ConfigurationProperties` + 快照 + 管理端刷新 + 60s 定时兜底；⑩新增 D10（`characterEncoding=UTF-8`）并同步 §6.4；⑪§7.1 `PageResult` 字段名与实现对齐（`list`） |
+| 2026-11-10 | 项目负责人 | v1.3（续）：§8.3 增「错误码口径」——抢锁失败 500ms 内轮询重试、耗尽转 **4090**（`5003` 仅限内部诊断），附 50 并发压测断言表（1 个 0 / 49 个 4090 / 0 个 5003）；§0 铁律 1、§7.2 `5xxx` 行、§12 并发验证同步 |
