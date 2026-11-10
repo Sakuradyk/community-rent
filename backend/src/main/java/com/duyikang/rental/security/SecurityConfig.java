@@ -62,7 +62,7 @@ public class SecurityConfig {
                 )
                 .exceptionHandling(eh -> eh
                         .authenticationEntryPoint((request, response, e) ->
-                                writeJson(response, ErrorCode.UNAUTHORIZED))
+                                writeJson(response, resolveAuthError(request)))
                         .accessDeniedHandler((request, response, e) ->
                                 writeJson(response, ErrorCode.FORBIDDEN))
                 )
@@ -73,6 +73,15 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /**
+     * 未登录时的返回码：默认 1001；若 {@link JwtAuthenticationFilter} 解析 token 失败，
+     * 则用它记下的原因（1003 非法 / 1004 过期），前端据此决定是「重新登录」还是「刷新 token」。
+     */
+    private ErrorCode resolveAuthError(jakarta.servlet.http.HttpServletRequest request) {
+        Object attr = request.getAttribute(JwtAuthenticationFilter.AUTH_ERROR_ATTRIBUTE);
+        return attr instanceof ErrorCode errorCode ? errorCode : ErrorCode.UNAUTHORIZED;
     }
 
     private void writeJson(HttpServletResponse response, ErrorCode errorCode) throws java.io.IOException {

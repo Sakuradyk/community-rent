@@ -59,6 +59,20 @@ public class Result<T> implements Serializable {
         return new Result<>(code, message, null);
     }
 
+    /**
+     * 失败但带数据：仅用于「拒绝的同时还要告诉前端怎么办」。
+     *
+     * <p>目前唯一场景是 4090 时段冲突——必须带 conflictDates 与 suggestRanges，
+     * 否则前端只能弹一句「已被占用」（PROJECT_RULES.md §8.3）。</p>
+     */
+    public static <T> Result<T> fail(ErrorCode errorCode, String message, T data) {
+        return new Result<>(errorCode.getCode(), message, data);
+    }
+
+    public static <T> Result<T> fail(int code, String message, T data) {
+        return new Result<>(code, message, data);
+    }
+
     public int getCode() {
         return code;
     }

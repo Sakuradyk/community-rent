@@ -1,6 +1,9 @@
 package com.duyikang.rental.security;
 
+import com.duyikang.rental.common.constant.ErrorCode;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,6 +32,29 @@ public class JwtUtil {
                    @Value("${jwt.expire-minutes:720}") long expireMinutes) {
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expireMillis = expireMinutes * 60L * 1000L;
+    }
+
+    /**
+     * 解析结果：成功时 {@code user != null}、{@code error == null}；
+     * 失败时 {@code user == null}、{@code error} 指明是「过期」还是「非法」。
+     *
+     * <p>为什么要区分：1001 表示「没带 token」，1004 表示「带过期了」，
+     * 1003 表示「带了个假的」。前端据此决定「去登录」还是「刷新 token」，
+     * 统一成 1001 就永远只能让用户重新登录（PROJECT_RULES.md §7.2）。</p>
+     */
+    public record ParseResult(LoginUser user, ErrorCode error) {
+
+        public boolean isOk() {
+            return user != null;
+        }
+
+        public static ParseResult success(LoginUser user) {
+            return new ParseResult(user, null);
+        }
+
+        public static ParseResult failure(ErrorCode error) {
+            return new ParseResult(null, error);
+        }
     }
 
     /**
@@ -63,16 +89,39 @@ public class JwtUtil {
                 .getPayload();
     }
 
-    /** 从 token 还原登录主体；token 非法时返回 null（不抛异常，便于过滤器直接放行给 Security 判定）。 */
-    public LoginUser resolve(String token) {
+    /**
+     * 解析并给出失败原因，供过滤器和 Security EntryPoint 使用。
+     *
+     * <p>过期 → {@link ErrorCode#TOKEN_EXPIRED}(1004)；签名错/格式错/主体缺失 →
+     * {@link ErrorCode#TOKEN_INVALID}(1003)。空字符串按非法处理（调用方应先判 null）。</p>
+     */
+    public ParseResult resolveWithReason(String token) {
+        if (token == null || token.isBlank()) {
+            return ParseResult.failure(ErrorCode.UNAUTHORIZED);
+        }
         try {
             Claims claims = parse(token);
             Long userId = Long.valueOf(claims.getSubject());
             String username = claims.get("username", String.class);
             String role = claims.get("role", String.class);
-            return new LoginUser(userId, username, role);
-        } catch (Exception e) {
-            return null;
+            if (username == null || role == null) {
+                return ParseResult.failure(ErrorCode.TOKEN_INVALID);
+            }
+            return ParseResult.success(new LoginUser(userId, username, role));
+        } catch (ExpiredJwtException e) {
+            return ParseResult.failure(ErrorCode.TOKEN_EXPIRED);
+        } catch (JwtException | IllegalArgumentException e) {
+            return ParseResult.failure(ErrorCode.TOKEN_INVALID);
         }
+    }
+
+    /**
+     * 从 token 还原登录主体；token 非法时返回 null。
+     *
+     * <p>只关心「能不能用」时用这个；需要告诉前端「为什么不能用」时用
+     * {@link #resolveWithReason(String)}。</p>
+     */
+    public LoginUser resolve(String token) {
+        return resolveWithReason(token).user();
     }
 }

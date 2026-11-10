@@ -44,13 +44,24 @@ public enum ErrorCode {
     DEPOSIT_INVALID(4002, "押金金额不合法"),
     SETTLEMENT_ALREADY_DONE(4003, "该订单已完成结算"),
     LOSS_RATIO_INVALID(4004, "损耗系数不合法"),
-    /** 时段冲突独立编号：唯一索引冲突 catch 后统一转此码，压测断言靠它计数。 */
+    /**
+     * 时段冲突独立编号：唯一索引冲突 catch 后统一转此码，压测断言靠它计数。
+     *
+     * <p>本码是对「4xxx = 费用」段位规则的<b>唯一显式豁免</b>（PROJECT_RULES.md §7.2）。
+     * 抛出时必须用 {@code BizException.occupancyConflict(msg, data)} 带上冲突日期与候选时段，
+     * 否则前端只能干巴巴提示「已被占用」。</p>
+     */
     OCCUPANCY_CONFLICT(4090, "该时段已被占用，请选择其他日期"),
 
     // ========== 5xxx 系统 ==========
     SYSTEM_ERROR(5000, "系统繁忙，请稍后重试"),
     DB_ERROR(5001, "数据访问异常"),
     CACHE_ERROR(5002, "缓存服务异常"),
+    /**
+     * 抢锁失败：<b>仅供内部诊断</b>（日志、定时任务、补偿任务），
+     * <b>禁止</b>作为下单等用户接口的对外返回码 —— 用户视角里不存在「锁」，
+     * 抢不到锁应伪装成 {@link #OCCUPANCY_CONFLICT}（PROJECT_RULES.md §8.3）。
+     */
     LOCK_ACQUIRE_FAILED(5003, "系统繁忙，请重试"),
     REMOTE_CALL_ERROR(5004, "外部服务调用失败");
 

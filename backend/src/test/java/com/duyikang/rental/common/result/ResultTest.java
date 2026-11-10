@@ -4,6 +4,8 @@ import com.duyikang.rental.common.constant.ErrorCode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -57,5 +59,26 @@ class ResultTest {
     @DisplayName("isSuccess_非0业务码_返回false")
     void isSuccess_whenBizError_returnsFalse() {
         assertTrue(!Result.fail(ErrorCode.CREDIT_NOT_ENOUGH).isSuccess());
+    }
+
+    @Test
+    @DisplayName("fail_带附加数据_明细原样保留")
+    void fail_withData_keepsDetail() {
+        Result<List<String>> result = Result.fail(
+                ErrorCode.OCCUPANCY_CONFLICT, "2026-10-02 已被占用", List.of("2026-10-02"));
+
+        assertEquals(4090, result.getCode());
+        assertEquals("2026-10-02 已被占用", result.getMessage());
+        assertEquals(List.of("2026-10-02"), result.getData());
+    }
+
+    @Test
+    @DisplayName("fail_自定义码与消息带数据_三个字段都对")
+    void fail_withIntCodeAndData_keepsAll() {
+        Result<String> result = Result.fail(3001, "状态不允许", "extra");
+
+        assertEquals(3001, result.getCode());
+        assertEquals("状态不允许", result.getMessage());
+        assertEquals("extra", result.getData());
     }
 }

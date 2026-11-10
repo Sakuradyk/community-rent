@@ -32,11 +32,11 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    /** 业务异常：可预期，warn 级别，不打全栈。 */
+    /** 业务异常：可预期，warn 级别，不打全栈；若异常带 data（如 4090 的冲突明细）则一并返回。 */
     @ExceptionHandler(BizException.class)
-    public Result<Void> handleBizException(BizException e, HttpServletRequest request) {
+    public Result<Object> handleBizException(BizException e, HttpServletRequest request) {
         log.warn("业务异常 uri={} code={} msg={}", request.getRequestURI(), e.getCode(), e.getMessage());
-        return Result.fail(e.getCode(), e.getMessage());
+        return Result.fail(e.getCode(), e.getMessage(), e.getData());
     }
 
     /** @RequestBody + @Valid 校验失败。 */

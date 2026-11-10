@@ -10,7 +10,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.3 · 2026-11-10 · 配套说明书 385 行版、需求总结 v1.0
+> **版本**：v1.3.1 · 2026-11-10 · 配套说明书 385 行版、需求总结 v1.0
 
 ---
 
@@ -449,7 +449,9 @@ spring:
 Result<T> { int code; String message; T data; String traceId; }
 ```
 
-- 成功固定 `code = 0`，`message = "ok"`。
+- 成功固定 `code = 0`，`message = "成功"`（取自 `ErrorCode.SUCCESS`，前端**不得**用 message 判成败，只认 `code === 0`）。
+- `data` 可为 `null`；失败时 `data` 一般不填，**唯一例外是 4090 时段冲突**——必须带冲突明细（`conflictDates` / `suggestRanges`），见 §8.3「错误码口径」。实现上由 `BizException(ErrorCode, String, Object)` 承载，`GlobalExceptionHandler` 原样写入 `Result.data`。
+- `traceId` 由 `TraceIdFilter` 写入 MDC，响应体与响应头 `X-Trace-Id` 同值；前端报错截图时凭它定位日志。
 - Controller **必须**返回 `Result<T>`，禁止直接返回 Entity 或 `Map`。
 - 分页统一 `PageResult<T> { List<T> list; long total; long pageNum; long pageSize; }`（字段名以已实现的 `common/result/PageResult` 为准，前端按 `data.list` 取）。
 
@@ -468,6 +470,17 @@ Result<T> { int code; String message; T data; String traceId; }
 > **关于 4090 的规则豁免**：本表规定 `4xxx` = 费用，而 `4090` 表示时段冲突，属**唯一一处显式例外**。原因：K2 压测脚本与前端 F7 都硬编码断言 `4090`，语义改成「费用类」反而会让「时段冲突」被当成金额问题提示用户。除此之外**不得**再出现跨段位编号；要加新码只能在本表已有码后面递增。
 
 新增错误码必须先 `grep` 确认未被占用，并**同时**更新 `common/constant/ErrorCode.java`、本节表格与 `docs/接口文档.md` 三处，缺一处视为未完成。
+
+**1001 / 1003 / 1004 的分工（已实现，改鉴权时必须保持）**：三条码必须都能真实产生，否则前端只能「一律跳登录」。
+
+| 场景 | 返回码 | 产生位置 |
+| :-- | :-- | :-- |
+| 完全没带 `Authorization` 头 | `1001` | `SecurityConfig` EntryPoint 默认值 |
+| 带了但签名/格式非法、或 claims 缺 username/role | `1003` | `JwtUtil.resolveWithReason` → `JwtAuthenticationFilter` 写入 `request` attribute `rental.auth.error` → EntryPoint 读取 |
+| 带了但已过期 | `1004` | 同上 |
+
+- 过滤器**禁止**自己写响应体（会导致 `/api/ping` 与业务接口两套 JSON 格式），只负责「建登录态」或「把失败码放进 attribute」。
+- 对应的回归测试：`JwtAuthenticationFilterTest` 四例（合法/过期/篡改/无头）；改动鉴权链路必须同步跑它。
 
 ### 7.3 分页与参数
 
@@ -774,3 +787,4 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-10 | 项目负责人 | v1.2（续）：§3 环境表更新——Maven 3.9.9 已安装至 `C:\dev\apache-maven-3.9.9`（`MAVEN_HOME` + 用户 `Path` 已配），新增 Maven 镜像与 GBK 编码两行备注 |
 | 2026-11-10 | 项目负责人 | **v1.3（外部审查后修订，12 条）**：①新增 §0 「铁律 12 条」摘要页；②§1「三者」改「四者」；③§2 MyBatis-Plus 由「3.5.5+」锁定为 **3.5.7** 并注明 3.5.9+ 需 `mybatis-plus-jsqlparser`；④§2 Redis 由「7.x」改为实测 **5.0.14.1** 并标注命令集限制；⑤§2 补 `dayjs`/`sass`/`unplugin-*` 三行，§2.1 增「已获批例外」；⑥§4.1 目录树重画（`src/main/resources` 与 `src/main/java` 同级，原缩进会被照建成错结构）；⑦§7.2 错误码表与已实现 `ErrorCode` 枚举对齐并加 4090 豁免说明；⑧§8.3 补三条前提——**逐日展开**、**锁在事务外/提交后释放**、预检不可信；⑨§9 去掉不可用的 `@RefreshScope`，改为 `@ConfigurationProperties` + 快照 + 管理端刷新 + 60s 定时兜底；⑩新增 D10（`characterEncoding=UTF-8`）并同步 §6.4；⑪§7.1 `PageResult` 字段名与实现对齐（`list`） |
 | 2026-11-10 | 项目负责人 | v1.3（续）：§8.3 增「错误码口径」——抢锁失败 500ms 内轮询重试、耗尽转 **4090**（`5003` 仅限内部诊断），附 50 并发压测断言表（1 个 0 / 49 个 4090 / 0 个 5003）；§0 铁律 1、§7.2 `5xxx` 行、§12 并发验证同步 |
+| 2026-11-10 | 项目负责人 | **v1.3.1（规则反查代码，代码回补）**：①§7.1 成功文案 `"ok"` 改为与 `ErrorCode.SUCCESS` 一致的 `"成功"`，补 `data` 为空的规则与 4090 例外；②§7.2 新增「1001/1003/1004 分工表」——过滤器只写 `rental.auth.error` attribute、EntryPoint 统一输出，禁止过滤器自写响应体；③代码侧同步：`BizException` 增 `data` 字段与 `occupancyConflict(msg,data)`、`Result` 增 `fail(code,msg,data)` 重载、`JwtUtil.resolveWithReason` 区分过期/非法、`JwtAuthenticationFilter` 不再吞掉失败原因；新增 `JwtAuthenticationFilterTest`(4)、`BizExceptionTest`(5)、`ResultTest` 扩至 7 例，共 **20/20 通过** |
