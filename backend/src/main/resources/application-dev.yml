@@ -1,0 +1,59 @@
+# ===================================================================
+# 社区物品租用平台 · 开发环境（本机真值，勿替换为占位符）
+# 库名固定 rental；账号密码见 PROJECT_RULES.md §3
+# ===================================================================
+spring:
+  datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/rental?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true
+    username: root
+    password: 123456
+    druid:
+      initial-size: 5
+      min-idle: 5
+      max-active: 20
+      max-wait: 60000
+      validation-query: SELECT 1
+      test-while-idle: true
+      test-on-borrow: false
+      test-on-return: false
+      time-between-eviction-runs-millis: 60000
+      min-evictable-idle-time-millis: 300000
+      keep-alive: true
+      # wall 会误拦多表 UPDATE ... JOIN，先不启用（PROJECT_RULES.md §4.8 D6）
+      filters: stat,slf4j
+      stat-view-servlet:
+        enabled: true
+        url-pattern: /druid/*
+        login-username: admin
+        login-password: druid123
+        allow: 127.0.0.1
+        reset-enable: false
+      web-stat-filter:
+        enabled: true
+        url-pattern: /*
+        exclusions: "*.js,*.css,/druid/*"
+      filter:
+        slf4j:
+          enabled: true
+          statement-executable-sql-log-enable: true
+
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      password: 123456
+      database: 0
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+          max-wait: 2000ms
+
+# JWT：HS256 要求密钥 >= 32 字节
+jwt:
+  secret: rental-platform-jwt-secret-key-2026-please-change-before-production
+  expire-minutes: 720
