@@ -1,8 +1,27 @@
 # AI 协作开发手册 · 社区物品租用平台
 
 > **适用对象**：首次使用 AI 辅助编程的开发者（本科毕设场景）
-> **配套文档**：`社区物品租用平台-课题说明书.md`（立论口径）· `社区物品租用平台-需求总结.md`（需求与排期）
-> **版本**：v1.0 · 2026-11-10
+> **版本**：v2.0 · 2026-11-11（v1.0 2026-11-10 初稿）
+
+---
+
+## 关于本文件与 `PROJECT_RULES.md` 的分工（先读这段）
+
+本项目有两份"约束性"文档，**职责严格分开，不重复维护**：
+
+| 文件 | 回答什么 | 性质 | 冲突时 |
+| :-- | :-- | :-- | :-- |
+| `PROJECT_RULES.md` | **必须怎么写**：版本、包结构、命名、异常、事务、提交、铁律 | 契约（可被检查） | **以它为准** |
+| 本文件 | **怎么和 AI 配合**：流程、提问方法、上下文管理、答辩防守 | 方法（指导动作） | 服从规则 |
+
+**一句话**：规则说"不许这样做"，本手册说"你应该这样干"。凡两处措辞不一致，一律以 `PROJECT_RULES.md` 为准，并回头把本文件改掉——**避免同一件事有两个说法**。
+
+具体地，下列内容**只在规则里维护，本手册不再抄第二份**：
+
+- 技术栈版本与"禁止写法"（规则 §2）
+- 提交信息格式与两档闸门 G1/G2/G3（规则 §14）
+- AI 协作行为准则 12 条（规则 §13）
+- 分层职责、命名、金额精度、错误码（规则 §4.3、§5–§7）
 
 ---
 
@@ -12,8 +31,8 @@
 
 AI 能一分钟吐出 300 行，但它不知道：
 - 你的占用区间是 `[start, end)` 还是 `[start, end]`（差一个符号，超卖逻辑全反）
-- 你的押金算出来是负数时该「追缴」还是「截断为 0」
-- 答辩老师会追问「去掉 Redis 锁会不会超卖」
+- 你的押金算出来是负数时该"追缴"还是"截断为 0"
+- 答辩老师会追问"去掉 Redis 锁会不会超卖"
 - 你的 Spring Boot 是 3.2（Jakarta）而它脑子里背的是 2.7（javax）
 
 **所以流程的唯一设计目标**：让 AI 每一步的输出，都落在你能**验证、回滚、讲清楚**的范围内。
@@ -25,10 +44,14 @@ AI 能一分钟吐出 300 行，但它不知道：
 | # | 铁律 | 违反后果 | 具体做法 |
 | :-- | :-- | :-- | :-- |
 | 1 | **你是架构师，AI 是工人** | 代码能跑但你讲不出来 → 答辩挂 | 凡是「要写进论文的决策」，必须是你定的；AI 只负责实现细节 |
-| 2 | **一次只改一处，改完必须能跑** | 一次改 8 个文件，报错后不知道是哪处错 | 一个功能点 = 一次会话 = 一次 commit |
-| 3 | **没有 commit 不开始新任务** | 改崩了回不去，只能重来 | 每个能跑的版本立刻 commit + tag |
+| 2 | **一次只改一处，改完必须能跑** | 一次改 8 个文件，报错后不知道是哪处错 | 一个功能点 = 一次会话 = 一次提交 |
+| 3 | **没有提交不开始新任务** | 改崩了回不去，只能重来 | 开工前先提交；提交分两档（见下） |
 
 **第四句附加**：**「能编译」不等于「对」，能过你的边界用例才叫对。**
+
+> **提交档位**（细节见 `PROJECT_RULES.md §14.2`）：改到一半、编译不过 → `wip(...)` 检查点；功能完整、G1 编译 + G2 单测 + G3 边界全过 → `feat/fix/...` 正式提交。**`wip` 不许打 tag、不许宣称完成，也不许连续两个。**
+>
+> **tag 只在 K 点完成时打**（`k2-conflict-done`、`k3-settlement-done`…，见规则 §14.4），不是每个能跑的版本都打——否则 tag 列表会变成第二套提交历史，答辩前根本找不到该回退到哪。
 
 ---
 
@@ -65,7 +88,7 @@ AI 能一分钟吐出 300 行，但它不知道：
 | :-- | :-- |
 | 跟已有设计冲突吗？ | 它是不是自己发明了一套 `ConflictChecker`，而你已经有了 `OrderService` 里的判定方法 |
 | 依赖的版本对吗？ | 它是不是用了 `javax.servlet`（你的 Boot 3.2 要 `jakarta`） |
-| 出问题回滚点在哪？ | 这个改动是新增方法还是改造已有方法？改造的就要先 commit 再动 |
+| 出问题回滚点在哪？ | 这个改动是新增方法还是改造已有方法？改造的就要先提交再动 |
 
 方案不过关 → 让它重出方案，不要让它「先写着看看」。
 
@@ -80,19 +103,25 @@ AI 能一分钟吐出 300 行，但它不知道：
 
 ### Step 4 · 本地跑通（三道验证，缺一不可）
 
-```bash
-# ① 编译 / 启动
-mvn -q clean compile && mvn spring-boot:run
+> 本项目**没有 Swagger 依赖**（规则 §2.1 禁止新增），验证一律用 `curl`。
+> `mvn` 只在安装后新开的终端里进 PATH；当前窗口请用全路径 `C:\dev\apache-maven-3.9.9\bin\mvn.cmd`。
 
-# ② 接口能通（Swagger 或 curl，不要靠"看着像对"）
+```bash
+# ① 编译 / 启动（在 backend/ 目录下）
+C:\dev\apache-maven-3.9.9\bin\mvn.cmd -q clean compile
+C:\dev\apache-maven-3.9.9\bin\mvn.cmd spring-boot:run
+
+# ② 接口能通（curl，不要靠"看着像对"）
 curl -X POST http://localhost:8080/api/orders \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"itemId":1,"startDate":"2026-12-01","endDate":"2026-12-03"}'
 
-# ③ 边界用例（这条最容易被跳过，也最能救命）
-#    [1,3) 与 [3,5)  → 期望 200，不冲突
-#    [1,3) 与 [2,4)  → 期望 4090
+# ③ 边界用例（这条最容易被跳过，也最能救命；清单见本文件 §4）
+#    [1,3) 与 [3,5)  → 期望 code=0，不冲突
+#    [1,3) 与 [2,4)  → 期望 code=4090
 ```
+
+**判断"真跑通了"的唯一依据**：响应体里的 `code` 是你预期的那个值。`200 OK` 不算——本项目安全配置把业务错误的 HTTP 状态也置为 200，只看 HTTP 状态会漏掉 401/4090。
 
 ### Step 5 · 自审 + 交叉审
 
@@ -113,15 +142,19 @@ curl -X POST http://localhost:8080/api/orders \
 [贴代码]
 ```
 
-> 新会话没有「我写的代码是对的」这个心理惯性，挑刺效率明显更高。
+> 新会话没有「我写的代码是对的」这个心理惯性，挑刺效率明显提高。
 
-### Step 6 · commit（检查点）
+### Step 6 · 提交
 
 ```bash
 git add -A
+# 功能完整、三道闸门全过 → 正式提交
 git commit -m "feat(order): 三层冲突检测 + 占用日唯一索引兜底"
-git tag w7-conflict-done
+# 只编译通过、还没写完 → 检查点
+# git commit -m "wip(order): 冲突判定骨架，预检未接唯一索引"
 ```
+
+> **`wip` 不打 tag**。tag 只在一个 K 点真正完成（G1+G2+G3+G4 全过）时打一次，例如 `k2-conflict-done`；日常提交靠 commit 哈希回退即可。
 
 ### Step 7 · 写 3 行笔记（30 秒，价值极高）
 
@@ -143,13 +176,13 @@ git tag w7-conflict-done
 ### 3.1 需求实现型
 
 ```
-【上下文】Spring Boot 3.2 + JDK 17 + MyBatis-Plus + MySQL 8。项目分层：
-controller / service / mapper / entity / dto。统一响应体 Result<T>，
-错误码见接口文档，冲突码是 4090。
+【上下文】Spring Boot 3.2.12 + JDK 17 + MyBatis-Plus 3.5.7 + MySQL 8.0.39 + Redis 5.0.14。
+项目分层：controller / service / mapper / entity / dto。统一响应体 Result<T>，
+业务码见 PROJECT_RULES §7.2，时段冲突码 4090，且必须带冲突日期与候选时段。
 【已有】OrderService 已有 createOrder，OrderMapper 有 selectActiveByItemId。
 【要什么】实现租期冲突判定，半开区间 [start,end)，冲突条件 s2<e1 && s1<e2。
 【约束】不新增表；锁用现有 RedisUtil；金额计算用 BigDecimal；
-       不要引入新依赖；注释用中文。
+       不引入新依赖；注释用中文。
 【验收】[1,3) 与 [3,5) 不冲突；[1,3) 与 [2,4) 冲突。
 先给方案，别写代码。
 ```
@@ -159,14 +192,14 @@ controller / service / mapper / entity / dto。统一响应体 Result<T>，
 ### 3.2 排错型（AI 最擅长，但你要喂对料）
 
 ```
-【现象】调用 POST /api/orders 返回 500
+【现象】调用 POST /api/orders 返回 code=5000
 【完整报错】
 org.springframework.dao.DuplicateKeyException:
 Duplicate entry '1-2026-12-01' for key 'order_occupancy.uk_occupancy'
   at ...(贴完整堆栈，不要截断中间)
 【相关代码】[贴 OrderServiceImpl 那 30 行 + 建表语句]
 【已试过】① 去掉唯一索引能过 ② 事务是 @Transactional 加在 public 方法上
-【环境】MySQL 8.0.35 / MyBatis-Plus 3.5.5 / Boot 3.2.0
+【环境】MySQL 8.0.39 / MyBatis-Plus 3.5.7 / Boot 3.2.12 / JDK 17
 ```
 
 **四条必给**：完整报错（含堆栈）、相关代码、已试过什么、精确版本号。
@@ -198,19 +231,7 @@ Duplicate entry '1-2026-12-01' for key 'order_occupancy.uk_occupancy'
 
 ---
 
-## 4. 质量五道闸门
-
-| 闸门 | 检查什么 | 通过标准 | 谁来做 |
-| :-- | :-- | :-- | :-- |
-| **G1 编译** | 能否启动 | `mvn compile` 零错误，应用起得来 | 命令 |
-| **G2 接口** | 功能是否存在 | Swagger/curl 返回预期 code | 你手动打 |
-| **G3 边界** | 逻辑是否正确 | 边界用例全过（见下表） | 你写用例 |
-| **G4 并发** | 硬指标是否成立 | 50 线程仅 1 单成功 | 压测脚本 |
-| **G5 复述** | 你是否真懂 | 能不看代码白板画出流程 | 你讲给空气听 |
-
-**G1–G2 是「AI 说完成了」的门槛；G3–G5 才是「质量」的门槛。** 90% 的新手只做到 G2 就往下走了。
-
-### 你项目必须覆盖的边界用例清单
+## 4. 你项目必须覆盖的边界用例清单（`docs/测试用例.md` 的骨架）
 
 | 模块 | 边界用例 | 期望 |
 | :-- | :-- | :-- |
@@ -219,6 +240,7 @@ Duplicate entry '1-2026-12-01' for key 'order_occupancy.uk_occupancy'
 | 冲突检测 | `[1,3)` vs `[1,3)` | 冲突 |
 | 冲突检测 | `start == end` | 参数非法 |
 | 冲突检测 | `start < 今天` | 参数非法 |
+| 冲突检测 | 自己租自己的物品 | 3006 自租禁止 |
 | 费用 | 归还日 − 起租日 = 0 | 按 1 天计 |
 | 费用 | 逾期正好 3 天 / 4 天 | 阶梯分界点 |
 | 费用 | 押金 − 逾期费 − 损耗费 < 0 | 生成待补缴，不出现负余额 |
@@ -228,44 +250,27 @@ Duplicate entry '1-2026-12-01' for key 'order_occupancy.uk_occupancy'
 | 信誉分 | 39 分 / 40 分 | 暂停资格 / 押金上浮 1.5 倍 |
 | 损耗 | 累计 L 超过 1 | 截断为 1 |
 | 权限 | 用户 A 访问用户 B 的订单 | 1002 FORBIDDEN |
-| 状态机 | 已完成订单再次取消 | 3001 INVALID_STATE_TRANSITION |
+| 状态机 | 已完成订单再次取消 | 3001 状态非法 |
 | 幂等 | 结算接口连调两次 | 返回同一结算单，流水不新增 |
+| 图片 | 发布物品 0 张图 | 2001 参数错误（跨行约束，靠应用层） |
 
-> 这张表就是 W14 测试报告的骨架。**现在就建，边开发边填。**
+> **闸门定义（G1–G5）与提交要求见 `PROJECT_RULES.md §14.2`、并发验证口径见 §12**，本文件不重复。
 
 ---
 
 ## 5. 版本控制纪律（第一次用 AI 最容易翻车的地方）
 
-### 5.1 开工第一天就做
+### 5.1 已经就绪，不用再做
 
-```bash
-git init
-git commit --allow-empty -m "chore: init"
-```
-
-`.gitignore` 必须有：
-
-```gitignore
-target/
-node_modules/
-dist/
-*.log
-.idea/
-.vscode/
-application-local.yml
-uploads/
-*.iml
-.DS_Store
-```
+`git init` 与 `.gitignore`（`target/`、`node_modules/`、`dist/`、`.idea/`、`uploads/`、`application-local.yml` 等）均已落地，`.gitattributes` 已设 `* text=auto eol=lf` 消除 CRLF 噪音。**回退点用 commit 哈希；tag 仅用于标记 K 点完成（规则 §14.4）。**
 
 ### 5.2 三条命令级规则
 
 | 规则 | 命令 | 为什么 |
 | :-- | :-- | :-- |
-| 让 AI 大改前必须先 commit | `git commit -am "checkpoint: 改之前"` | 改崩了一键 `git checkout .` 回去 |
-| 每个能跑的版本打 tag | `git tag w7-done` | 答辩前要回退到某个版本时救命 |
-| 不要在一个 commit 里混多个改动 | — | 出问题无法定位，`git bisect` 也救不了你 |
+| 让 AI 大改前必须先提交 | `git commit -am "wip(xxx): 改之前"` | 改崩了一键 `git checkout .` 回去 |
+| 一个提交只做一件事 | — | 出问题无法定位，`git bisect` 也救不了你 |
+| 提交信息写清"为什么" | 见规则 §14.1 | 三周后你自己就是那个需要看历史的人 |
 
 ### 5.3 翻车急救
 
@@ -273,7 +278,7 @@ uploads/
 git status              # 改了什么
 git diff                # 具体改了哪几行
 git checkout -- 文件路径  # 单个文件回滚
-git checkout .          # 全部回滚到上次 commit
+git checkout .          # 全部回滚到上次提交
 git reset --hard HEAD   # 丢弃所有未提交改动（慎用）
 ```
 
@@ -283,42 +288,22 @@ git reset --hard HEAD   # 丢弃所有未提交改动（慎用）
 
 ## 6. 上下文管理（长会话必失忆）
 
-### 6.1 项目根放一个 `PROJECT_RULES.md`
+### 6.1 每次新会话的第一句话
 
-每次新会话第一句：`请先读 PROJECT_RULES.md 和 需求总结.md`
-
-```markdown
-# 项目约定（AI 必读）
-
-## 技术栈（严格照此，不要用其他版本的 API）
-- Spring Boot 3.2.x（Jakarta EE 9+，**不是** javax）
-- JDK 17
-- MyBatis-Plus 3.5.5+（spring-boot3-starter）
-- MySQL 8.0 InnoDB
-- Redis 7
-- Spring Security 6 + jjwt 0.12.x
-- Vue 3 + `<script setup>` + Element Plus + Pinia + Vite
-
-## 代码约定
-- 包结构：com.{项目}.{module}.{controller|service|mapper|entity|dto|config}
-- Controller 只做参数校验与响应封装，业务全在 Service
-- 统一响应体 Result<T>，错误码严格按接口文档，禁止自定义新段位
-- 金额一律 BigDecimal，禁止 double/float
-- 日期一律 LocalDate（yyyy-MM-dd），时间 LocalDateTime
-- 注释中文，类和方法必须有 Javadoc
-- 禁止：Lombok 的 @Data 用在有继承关系的 Entity 上
-
-## 禁止事项
-- 不要引入需求总结里标记为「明确不做」的任何功能
-- 不要新增依赖而不问我
-- 不要改动我没有提到的文件
-- 不要写 TODO 占位后说"已完成"
-
-## 参考文档
-- 需求：社区物品租用平台-需求总结.md
-- 接口：接口文档.md
-- 表结构：数据库设计.md
 ```
+请先读 PROJECT_RULES.md、社区物品租用平台-需求总结.md、项目进度.md，然后按 PROJECT_RULES.md 执行。
+```
+
+三份文件分工（不要贴错）：
+
+| 文件 | 提供什么 | 什么时候读 |
+| :-- | :-- | :-- |
+| `PROJECT_RULES.md` | 硬约束（版本、分层、错误码、提交、铁律） | **每个新会话必读** |
+| `社区物品租用平台-需求总结.md` | FR 清单、状态机、公式、边界裁定 | 本任务涉及业务规则时读对应章节 |
+| `项目进度.md` | 做到哪一步、下一步是什么、已知坑 | **每个新会话必读** |
+| `社区物品租用平台-课题说明书.md` | 立论母版 | 只在写论文/准备答辩时读 |
+
+> 说明书是"母版"，不是"日常手册"。日常开发读它会白烧上下文。
 
 ### 6.2 会话切分原则
 
@@ -332,30 +317,7 @@ git reset --hard HEAD   # 丢弃所有未提交改动（慎用）
 
 ---
 
-## 7. 你这套技术栈的高发错误（背下来，能省几十小时）
-
-| # | 陷阱 | AI 常给的错误写法 | 正确写法 |
-| :-- | :-- | :-- | :-- |
-| 1 | javax vs jakarta | `import javax.servlet.http.HttpServletRequest` | Boot 3 必须 `jakarta.servlet.http.*` |
-| 2 | Security 配置 | `class X extends WebSecurityConfigurerAdapter` | Security 6：`@Bean SecurityFilterChain filterChain(HttpSecurity http)` |
-| 3 | MyBatis-Plus starter | `mybatis-plus-boot-starter` | Boot 3 用 `mybatis-plus-spring-boot3-starter` |
-| 4 | jjwt API | `Jwts.parser().setSigningKey(key).parseClaimsJws(t)` | 0.12.x：`Jwts.parser().verifyWith(key).build().parseSignedClaims(t)` |
-| 5 | Vue 版本混用 | `data(){return{}}` + `this.xxx` | Vue 3 `<script setup>` + `ref()/reactive()` |
-| 6 | Element UI vs Plus | `size="medium"` | Element Plus 只有 `large/default/small` |
-| 7 | Redis 锁 | `SETNX` 成功后 `DEL`（两步） | `SET key val NX PX 10000` + Lua 脚本校验持有者再删 |
-| 8 | 事务失效 | `@Transactional` 加在 private 方法 / 同类内部调用 | 必须 public + 跨代理调用（或 `AopContext`） |
-| 9 | 唯一索引异常 | 让 `DuplicateKeyException` 冒到 500 | Service 内 catch → 转 `4090 TIME_CONFLICT` |
-| 10 | 分页方言 | `LIMIT #{offset}, #{size}` 混拼 | MySQL 8 用 `LIMIT #{size} OFFSET #{offset}` |
-| 11 | 时间字段 | `java.util.Date` / `Timestamp` | `LocalDate` / `LocalDateTime` + `@JsonFormat` |
-| 12 | 循环依赖 | Service 互相 `@Autowired` | 拆接口 / 用事件 / `@Lazy`，别靠 `spring.main.allow-circular-references=true` |
-| 13 | 金额 | `double` 或 `float` | `BigDecimal` + `DECIMAL(10,2)` |
-| 14 | Jackson 序列化 | Long 型 id 传到前端精度丢失 | `@JsonSerialize(using = ToStringSerializer.class)` 或前端用 string |
-
-> **用法**：AI 给出代码后，扫一眼这 14 条。命中任何一条，直接指出来让它改。这比事后排错快十倍。
-
----
-
-## 8. 不能外包给 AI 的四件事
+## 7. 不能外包给 AI 的四件事
 
 | # | 事项 | 为什么 | 你该做什么 |
 | :-- | :-- | :-- | :-- |
@@ -368,7 +330,7 @@ git reset --hard HEAD   # 丢弃所有未提交改动（慎用）
 
 ---
 
-## 9. 20 周 AI 协作强度表
+## 8. 20 周 AI 协作强度表
 
 | 阶段 | 周次 | AI 角色 | 你的角色 | 人机配比 |
 | :-- | :-- | :-- | :-- | :-- |
@@ -382,13 +344,13 @@ git reset --hard HEAD   # 丢弃所有未提交改动（慎用）
 
 ---
 
-## 10. 答辩防守
+## 9. 答辩防守
 
-### 10.1 态度
+### 9.1 态度
 
 AI 辅助编程是现在的行业常态，写进论文「开发工具」一栏、如实说明用途即可。**遮遮掩掩才是风险，能讲清楚才是本事。**
 
-### 10.2 每周一次的「闭卷复述」训练
+### 9.2 每周一次的「闭卷复述」训练
 
 任选一个刚做完的 K 点，合上电脑，对着白纸回答：
 
@@ -399,7 +361,7 @@ AI 辅助编程是现在的行业常态，写进论文「开发工具」一栏�
 
 **答不上来 → 回去读代码 → 重答。这一步做 6 次，答辩就稳了。**
 
-### 10.3 论文写法建议
+### 9.3 论文写法建议
 
 在第 2 章或附录加一小节「开发工具与环境」，如实写：
 
@@ -409,35 +371,9 @@ AI 辅助编程是现在的行业常态，写进论文「开发工具」一栏�
 
 ---
 
-## 11. 今天就能做的 5 件事
+## 附录 A · 变更记录
 
-| # | 动作 | 耗时 | 命令 |
+| 版本 | 日期 | 变更 | 原因 |
 | :-- | :-- | :-- | :-- |
-| 1 | 初始化 git + `.gitignore` + 首次 commit | 5 min | `git init` 等 |
-| 2 | 建 `PROJECT_RULES.md`（照抄 §6.1） | 10 min | 新建文件 |
-| 3 | 建 `docs/notes/` 与 `docs/` 目录结构 | 2 min | — |
-| 4 | 搭空壳工程，跑通「统一响应体 + 全局异常 + JWT」三件套 | 半天 | 见需求总结 §11.2 W4 |
-| 5 | 把 §4「边界用例清单」复制成 `docs/测试用例.md`，边开发边填 | 10 min | — |
-
----
-
-## 12. 一页速查（贴在显示器旁边）
-
-```
-┌─────────────────────────────────────────────┐
-│  一次任务的循环                              │
-│                                              │
-│  0 定靶（目标/验收/不做）                     │
-│  1 要方案，不要代码                          │
-│  2 评审方案（冲突？版本？回滚点？）           │
-│  3 分段产出（一次一个文件）                   │
-│  4 跑通（编译 → 接口 → 边界）                │
-│  5 自审 + 新会话交叉审                       │
-│  6 commit + tag                              │
-│  7 写 3 行笔记                               │
-│                                              │
-│  改崩了 → git checkout .  → 重新提需求        │
-│  失忆了 → 开新会话 → 先读 PROJECT_RULES.md    │
-│  拿不准 → 问「先给方案」                      │
-└─────────────────────────────────────────────┘
-```
+| v2.0 | 2026-11-11 | 移入 `docs/`；新增"与 `PROJECT_RULES.md` 分工"声明；删除与规则重复的 4 块内容（五道闸门表、`PROJECT_RULES` 模板骨架、14 条版本陷阱、一页速查图）与已完成的「今天就能做的 5 件事」；修正两处与规则冲突的做法（**给每个版本打 tag** → 按 §14.2 两档提交、`wip` 不打 tag；**Swagger 验证** → 项目无该依赖，改 curl + 断言 `code`）；提示词模板版本号更新为实测值 | 消除"同一规则两处维护"导致的漂移；443 行 → 379 行，只保留规则覆盖不到的方法论 |
+| v1.0 | 2026-11-10 | 初稿 12 章 | 首次使用 AI 开发的流程指导 |
