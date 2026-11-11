@@ -12,7 +12,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.5 · 2026-11-11 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
+> **版本**：v1.6 · 2026-11-11 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
 
 ---
 
@@ -148,7 +148,8 @@
 │   │   │   ├── recommend/        ← 推荐（K5）
 │   │   │   ├── loss/             ← 损耗检修（K6）
 │   │   │   ├── appeal/           ← 申诉与纠纷
-│   │   │   └── message/          ← 站内信
+│   │   │   ├── message/          ← 站内信
+│   │   │   └── system/           ← 系统参数（sys_config 键值：推荐权重、锁 TTL、扫描 cron）
 │   │   ├── admin/                ← 管理端专用接口（controller 层）
 │   │   └── job/                  ← 定时任务（逾期扫描、结算补偿、推荐更新）
 │   │
@@ -658,6 +659,8 @@ public Long createOrder(OrderCreateDTO dto) {
 ## 12. 测试规范
 
 - 框架：JUnit 5 + Spring Boot Test + Mockito。
+- **Mockito 必须禁用 inline mock maker**：本机 JDK `17+35-LTS-2724` 不提供可用的 agent 自挂载，`@SpringBootTest` 一跑就报 `Could not initialize inline Byte Buddy mock maker`。`backend/src/test/resources/mockito-extensions/org.mockito.plugins.MockMaker` 内容固定为 `mock-maker-subclass`（这是配置文件，不是新增依赖）。用它之后无法 mock `final` 类/静态方法——需要 mock 它们说明设计该改。
+- 集成测试（`*IntegrationTest`）连真实 `rental` 库，类上加 `@Transactional` 自动回滚；**禁止**用 H2 或改连测试库（§2.1 禁新增依赖）。
 - 新增核心业务方法（冲突判定、费用计算、信誉变更、损耗累计）**必须**配单元测试。
 - 测试命名：`方法名_场景_期望结果`，例如 `createOrder_overlapRange_throwsTimeConflict`。
 - 必须覆盖的边界（详见 `docs/测试用例.md`）：
@@ -795,3 +798,4 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-10 | 项目负责人 | **v1.3.1（规则反查代码，代码回补）**：①§7.1 成功文案 `"ok"` 改为与 `ErrorCode.SUCCESS` 一致的 `"成功"`，补 `data` 为空的规则与 4090 例外；②§7.2 新增「1001/1003/1004 分工表」——过滤器只写 `rental.auth.error` attribute、EntryPoint 统一输出，禁止过滤器自写响应体；③代码侧同步：`BizException` 增 `data` 字段与 `occupancyConflict(msg,data)`、`Result` 增 `fail(code,msg,data)` 重载、`JwtUtil.resolveWithReason` 区分过期/非法、`JwtAuthenticationFilter` 不再吞掉失败原因；新增 `JwtAuthenticationFilterTest`(4)、`BizExceptionTest`(5)、`ResultTest` 扩至 7 例，共 **20/20 通过** |
 | 2026-11-11 | 项目负责人 | **v1.4（文档索引）**：§15 参考文档索引新增 `项目进度.md`（回答「做到哪了」，含三条硬指标现状与未完成项依赖顺序），`docs/数据库设计.md` 状态由「待产出」更新为「已完成，18 表」。本版不改任何技术口径，仅改索引；配套实绩：数据库 18 表已落地（commit `8d2910a`、`c608282`），进度文档 commit `3871a2b` |
 | 2026-11-11 | 项目负责人 | **v1.5（文档去重，确立单一真源）**：①`AI协作开发手册.md` 由根目录移入 `docs/`，瘦身 v1.0→v2.0（443 行 → 379 行），删除与本文件重复的四块（G1–G5 闸门表、`PROJECT_RULES` 模板骨架、14 条版本陷阱、一页速查图）与已完成的「今天就能做的 5 件事」；②手册新增「与本文件分工」声明，**同一规则只在本文件维护，冲突以本文件为准**；③修正手册两处与本文件的冲突（「每个能跑的版本打 tag、`wip` 也可打」→ 按 §14.2/§14.4 仅 K 点完成时打 tag、`wip` 不打；「用 Swagger 验证接口」→ 项目无该依赖，改 `curl` + 断言响应体 `code`）；④§4.1 目录树同步：移除根目录手册、补 `项目进度.md` 与 `sql/03-verify.sql`；⑤§15 索引行同步新路径与定位 |
+| 2026-11-11 | 项目负责人 | **v1.6（实体层落地）**：①§4.1 目录树 `module/` 下新增 `system/`（`sys_config` 键值参数归属，原先 18 张表里这张无处安放）；②§12 新增两条测试前提——**Mockito 必须用 `mock-maker-subclass`**（本机 JDK `17+35` 无可用 agent 自挂载，inline mock maker 会让每个 `@SpringBootTest` 报 `Could not initialize inline Byte Buddy mock maker`）、集成测试连真实库 + `@Transactional` 回滚且禁用 H2；③配套实绩：18 实体 + 18 Mapper + `MybatisPlusConfig`（分页插件显式注册）+ `MapperIntegrationTest` 8 例，测试总数 20 → **28/28** |
