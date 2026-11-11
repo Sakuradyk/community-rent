@@ -26,6 +26,7 @@ DROP TABLE IF EXISTS `fee_flow`;
 DROP TABLE IF EXISTS `settlement`;
 DROP TABLE IF EXISTS `order_occupancy`;
 DROP TABLE IF EXISTS `rental_order`;
+DROP TABLE IF EXISTS `item_image`;
 DROP TABLE IF EXISTS `item`;
 DROP TABLE IF EXISTS `category`;
 DROP TABLE IF EXISTS `user_role`;
@@ -133,7 +134,7 @@ CREATE TABLE `item` (
     `category_id`    BIGINT UNSIGNED NOT NULL               COMMENT '类目',
     `title`          VARCHAR(64)     NOT NULL               COMMENT '标题',
     `description`    VARCHAR(1000)            DEFAULT NULL  COMMENT '描述（推荐内容特征的来源）',
-    `cover_url`      VARCHAR(255)             DEFAULT NULL  COMMENT '封面图',
+    `cover_url`      VARCHAR(255)             DEFAULT NULL  COMMENT '封面图（= item_image 里 id 最小的一张，冗余存一份以免列表页 join）',
     `community`      VARCHAR(64)     NOT NULL DEFAULT '默认社区' COMMENT '所在社区（本课题用枚举串代替地图）',
     `daily_price`    DECIMAL(10, 2)  NOT NULL               COMMENT '日租金',
     `deposit`        DECIMAL(10, 2)  NOT NULL DEFAULT 0.00  COMMENT '押金',
@@ -158,6 +159,27 @@ CREATE TABLE `item` (
     CONSTRAINT `ck_item_overdue_rate` CHECK (`overdue_rate` >= 0),
     CONSTRAINT `ck_item_loss_value` CHECK (`loss_value` >= 0 AND `loss_value` <= 1)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '物品表';
+
+-- ---------------------------------------------------------------------------
+-- 5.1 item_image 物品图片表
+-- 用途：一件物品的多张图（需求总结 FR-M1-01「图片≥1」、FR-S-06 上传）。列表页不查本表，
+--       直接用 item.cover_url；只有详情页做一次 `WHERE item_id = ? ORDER BY id`。
+-- 为什么不做 sort_no：需求总结 §10 灰区裁定「多图排序」为 P2 —— 上传顺序即展示顺序，
+--       用自增 id 排序即可，不引入排序字段与拖拽交互。
+-- 为什么不存二进制：图片落本地磁盘 ${upload.dir}/{yyyyMM}/，库里只存相对路径
+--       （需求总结 §2.3「图片存储 P0 = 本地磁盘 + 静态资源映射」）。
+-- uk_item_image(item_id, url)：同一物品重复提交同一张图会被拦住，避免前端重复点上传。
+-- ---------------------------------------------------------------------------
+CREATE TABLE `item_image` (
+    `id`         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键（同时也是展示顺序）',
+    `item_id`    BIGINT UNSIGNED NOT NULL               COMMENT '物品',
+    `url`        VARCHAR(255)    NOT NULL               COMMENT '相对路径，如 /uploads/202611/abc.jpg',
+    `created_at` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_item_image` (`item_id`, `url`) COMMENT '同一物品同一张图只存一次',
+    KEY `idx_item_image_item` (`item_id`, `id`)   COMMENT '详情页按上传顺序取图',
+    CONSTRAINT `ck_item_image_item` CHECK (`item_id` > 0)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '物品图片表';
 
 -- ===========================================================================
 -- 三、订单与时段占用（K2 核心）
@@ -488,5 +510,5 @@ CREATE TABLE `sys_config` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '系统参数表（键值）';
 
 -- ============================================================================
--- 建表完成：17 张表
+-- 建表完成：18 张表
 -- ============================================================================

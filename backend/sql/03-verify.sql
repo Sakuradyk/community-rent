@@ -7,8 +7,8 @@
 SET NAMES utf8mb4;
 USE rental;
 
--- A1 表数量必须为 17
-SELECT IF(cnt = 17, 'PASS', 'FAIL') AS `A1_table_count`, cnt AS `actual`
+-- A1 表数量必须为 18
+SELECT IF(cnt = 18, 'PASS', 'FAIL') AS `A1_table_count`, cnt AS `actual`
 FROM (SELECT COUNT(*) AS cnt FROM information_schema.tables
       WHERE table_schema = 'rental' AND table_type = 'BASE TABLE') t;
 
@@ -92,11 +92,30 @@ SELECT IF((SELECT COUNT(*) FROM credit_policy) = 1
       AND (SELECT COUNT(*) FROM fee_policy) = 1
       AND (SELECT COUNT(*) FROM loss_policy) = 1, 'PASS', 'FAIL') AS `A14_policy_single_row`;
 
+-- A15 每件物品至少 1 张图（需求总结 FR-M1-01「图片≥1」）
+SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A15_item_has_image`, IFNULL(GROUP_CONCAT(id), '-') AS `bad_items`
+FROM item i
+WHERE i.deleted = 0
+  AND NOT EXISTS (SELECT 1 FROM item_image img WHERE img.item_id = i.id);
+
+-- A16 item.cover_url 必须等于该物品 id 最小的那张图（否则列表与详情首图不一致）
+SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A16_cover_is_first`, IFNULL(GROUP_CONCAT(i.id), '-') AS `bad_items`
+FROM item i
+JOIN (SELECT item_id, MIN(id) AS min_id FROM item_image GROUP BY item_id) m ON m.item_id = i.id
+JOIN item_image f ON f.id = m.min_id
+WHERE i.cover_url IS NULL OR i.cover_url <> f.url;
+
+-- A17 图片路径必须是本地静态资源相对路径（FR-S-06：/uploads/{yyyyMM}/，不存外链、不存二进制）
+SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A17_image_path_shape`, COUNT(*) AS `actual`
+FROM item_image
+WHERE url NOT LIKE '/uploads/%' OR CHAR_LENGTH(url) > 255;
+
 -- 参考信息：各表行数
 SELECT 'user' AS tbl, COUNT(*) AS rows_cnt FROM `user`
 UNION ALL SELECT 'role', COUNT(*) FROM `role`
 UNION ALL SELECT 'category', COUNT(*) FROM `category`
 UNION ALL SELECT 'item', COUNT(*) FROM `item`
+UNION ALL SELECT 'item_image', COUNT(*) FROM `item_image`
 UNION ALL SELECT 'rental_order', COUNT(*) FROM `rental_order`
 UNION ALL SELECT 'order_occupancy', COUNT(*) FROM `order_occupancy`
 UNION ALL SELECT 'settlement', COUNT(*) FROM `settlement`
