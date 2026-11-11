@@ -17,6 +17,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.util.stream.Collectors;
 
@@ -96,6 +97,19 @@ public class GlobalExceptionHandler {
     public Result<Void> handleDuplicateKey(DuplicateKeyException e) {
         log.warn("唯一索引冲突：{}", e.getMostSpecificCause().getMessage());
         return Result.fail(ErrorCode.OCCUPANCY_CONFLICT, "该时段已被占用，请选择其他日期");
+    }
+
+    /**
+     * 上传文件超过 multipart 上限。
+     *
+     * <p>不处理会落到兜底 {@code Exception} → 5000，把「用户选了大图」报成「系统故障」，
+     * 属于错误码段位错用。{@code spring.servlet.multipart.max-file-size} 与
+     * {@code file.max-size-mb} 必须同步改（PROJECT_RULES.md §9）。</p>
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public Result<Void> handleMaxUploadSize(MaxUploadSizeExceededException e) {
+        log.warn("上传文件超限：{}", e.getMessage());
+        return Result.fail(ErrorCode.FILE_TOO_LARGE);
     }
 
     /** 无权访问（Spring Security 抛出）。 */

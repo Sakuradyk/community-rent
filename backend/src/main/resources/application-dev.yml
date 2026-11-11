@@ -57,3 +57,11 @@ spring:
 jwt:
   secret: rental-platform-jwt-secret-key-2026-please-change-before-production
   expire-minutes: 720
+
+# 文件存储（基础设施配置，不进策略表；PROJECT_RULES.md §9）
+# max-size-mb 必须与 spring.servlet.multipart.max-file-size 保持一致
+file:
+  root: C:/Users/duyikang/Desktop/社区物品租用平台/uploads
+  access-path: /uploads
+  max-size-mb: 5
+  allowed-ext: jpg,jpeg,png,webp

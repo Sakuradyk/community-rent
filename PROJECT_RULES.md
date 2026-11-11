@@ -12,7 +12,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.6 · 2026-11-11 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
+> **版本**：v1.7 · 2026-11-11 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
 
 ---
 
@@ -149,7 +149,7 @@
 │   │   │   ├── loss/             ← 损耗检修（K6）
 │   │   │   ├── appeal/           ← 申诉与纠纷
 │   │   │   ├── message/          ← 站内信
-│   │   │   └── system/           ← 系统参数（sys_config 键值：推荐权重、锁 TTL、扫描 cron）
+│   │   │   └── system/           ← 系统支撑：配置参数（sys_config）与文件存储（上传/静态映射）
 │   │   ├── admin/                ← 管理端专用接口（controller 层）
 │   │   └── job/                  ← 定时任务（逾期扫描、结算补偿、推荐更新）
 │   │
@@ -625,6 +625,7 @@ public Long createOrder(OrderCreateDTO dto) {
 | 推荐 | `recommend.w.cf` / `.content` / `.heat` | 0.6 / 0.3 / 0.1 |
 | 推荐 | `recommend.decay.half_life`（天） | 30 |
 | 订单 | `order.lock.ttl`（秒） | 10 |
+| 基础设施 | `file.root` / `.access-path` / `.max-size-mb` / `.allowed-ext` | `uploads` / `/uploads` / 5 / `jpg,jpeg,png,webp` |
 
 **实现方式**（本项目**没有** `spring-cloud` 依赖，`@RefreshScope` 用不了，别写）：
 
@@ -635,6 +636,8 @@ public Long createOrder(OrderCreateDTO dto) {
 3. **禁止**：`@RefreshScope`（编译不过）、每次业务实时查配置表（性能）、用 `static` 变量缓存配置（刷不掉）、把默认值直接写成代码字面量又「顺便」放个配置文件双份。
 
 > **验收方式**：改一行数据库配置 → 点管理端「刷新配置」→ 系统行为立即改变，**不重启、不重新编译**。这是「规则外置」的证据，答辩演示会用到；只把值挪进 yml 不算达标（改 yml 要重启，证明不了什么）。
+
+> **唯一的例外：基础设施配置**。`file.*` 四项（存盘目录、访问前缀、大小上限、扩展名白名单）走 `application.yml`，**不进策略表**——它们不改变业务规则，只告诉程序「文件落在哪个盘」；改它们必须重启也无可演示性。判定标准只有一条：**这个值变了，租用/计费/信誉/损耗的行为会不会变？** 会变 → 进表；不会变 → 进 yml。
 
 ---
 
@@ -799,3 +802,4 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-11 | 项目负责人 | **v1.4（文档索引）**：§15 参考文档索引新增 `项目进度.md`（回答「做到哪了」，含三条硬指标现状与未完成项依赖顺序），`docs/数据库设计.md` 状态由「待产出」更新为「已完成，18 表」。本版不改任何技术口径，仅改索引；配套实绩：数据库 18 表已落地（commit `8d2910a`、`c608282`），进度文档 commit `3871a2b` |
 | 2026-11-11 | 项目负责人 | **v1.5（文档去重，确立单一真源）**：①`AI协作开发手册.md` 由根目录移入 `docs/`，瘦身 v1.0→v2.0（443 行 → 379 行），删除与本文件重复的四块（G1–G5 闸门表、`PROJECT_RULES` 模板骨架、14 条版本陷阱、一页速查图）与已完成的「今天就能做的 5 件事」；②手册新增「与本文件分工」声明，**同一规则只在本文件维护，冲突以本文件为准**；③修正手册两处与本文件的冲突（「每个能跑的版本打 tag、`wip` 也可打」→ 按 §14.2/§14.4 仅 K 点完成时打 tag、`wip` 不打；「用 Swagger 验证接口」→ 项目无该依赖，改 `curl` + 断言响应体 `code`）；④§4.1 目录树同步：移除根目录手册、补 `项目进度.md` 与 `sql/03-verify.sql`；⑤§15 索引行同步新路径与定位 |
 | 2026-11-11 | 项目负责人 | **v1.6（实体层落地）**：①§4.1 目录树 `module/` 下新增 `system/`（`sys_config` 键值参数归属，原先 18 张表里这张无处安放）；②§12 新增两条测试前提——**Mockito 必须用 `mock-maker-subclass`**（本机 JDK `17+35` 无可用 agent 自挂载，inline mock maker 会让每个 `@SpringBootTest` 报 `Could not initialize inline Byte Buddy mock maker`）、集成测试连真实库 + `@Transactional` 回滚且禁用 H2；③配套实绩：18 实体 + 18 Mapper + `MybatisPlusConfig`（分页插件显式注册）+ `MapperIntegrationTest` 8 例，测试总数 20 → **28/28** |
+| 2026-11-11 | 项目负责人 | **v1.7（文件上传落地）**：①§4.1 `module/system/` 注释扩为「系统支撑：配置参数 + 文件存储」，`FileController`/`UploadVO` 归此包（不新建 `module/file`，避免目录树膨胀）；②§9 配置清单追加 `file.*` 四项，并新增「唯一的例外：基础设施配置」——走 yml 不进策略表的判定标准是**「这个值变了，租用/计费/信誉/损耗的行为会不会变」**；③配套实绩：`FileStorageProperties` + `FileStorageUtil`（UUID 重命名防路径穿越）+ `WebMvcConfig`（`/uploads/**` 静态映射）+ `POST /api/files/upload`，`GlobalExceptionHandler` 补 `MaxUploadSizeExceededException`→2005，`SecurityConfig` 放行 `/uploads/**`（`<img>` 带不了 Authorization 头）；`FileStorageUtilTest` 7 例，测试总数 28 → **35/35** |
