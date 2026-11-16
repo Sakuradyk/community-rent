@@ -53,9 +53,10 @@ public class Item {
     private String coverUrl;
 
     /**
-     * 所在社区
+     * 所在社区，引用 community.id（发布时必填）
      */
-    private String community;
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long communityId;
 
     /**
      * 日租金

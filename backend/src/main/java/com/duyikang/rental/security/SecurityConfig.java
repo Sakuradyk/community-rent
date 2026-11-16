@@ -57,6 +57,9 @@ public class SecurityConfig {
                                 // 物品图片必须匿名可读：<img src> 无法携带 Authorization 头。
                                 // 这里只暴露 /uploads 下的静态文件，不含任何业务数据（PROJECT_RULES.md §4.6 F1 之外的补充）
                                 "/uploads/**",
+                                // 社区下拉是注册页/发布页的公共字典：未登录也要能拉到，否则注册页空着没法填。
+                                // 只读、无用户数据，故放行（PROJECT_RULES.md §4.3：Controller 只读不写）。
+                                "/api/communities",
                                 "/error",
                                 "/favicon.ico"
                         ).permitAll()

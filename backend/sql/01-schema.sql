@@ -1,6 +1,6 @@
 -- ============================================================================
 -- 社区物品租用平台 · 建表脚本 01-schema.sql
--- 目标库：rental（utf8mb4）   版本：v1.0   日期：2026-11-11
+-- 目标库：rental（utf8mb4）   版本：v1.1   日期：2026-11-16
 -- ----------------------------------------------------------------------------
 -- 设计口径见 docs/数据库设计.md，要点：
 --   1) 不建物理外键，关联完整性由应用层 + 唯一索引保证（PROJECT_RULES.md §5）
@@ -8,6 +8,7 @@
 --   3) K2 的最后防线是 uk_occupancy(item_id, occupy_date)：占用必须【逐日展开】
 --   4) 订单表名用 rental_order 而非 order —— order 是 SQL 保留字，全库反引号成本高
 --   5) 只给"会被 WHERE / ORDER BY 用到"的列建索引，不建"看起来完整"的冗余索引
+--   6) 社区用字典表 community，user/item 只存 community_id —— 消灭"阳光花园 / 阳光花园小区"这类别名歧义
 -- ----------------------------------------------------------------------------
 -- ⚠ 本脚本头部会 DROP 全部业务表，仅用于开发库重建。生产/有数据的库禁止直接执行。
 -- ============================================================================
@@ -31,6 +32,7 @@ DROP TABLE IF EXISTS `item`;
 DROP TABLE IF EXISTS `category`;
 DROP TABLE IF EXISTS `user_role`;
 DROP TABLE IF EXISTS `role`;
+DROP TABLE IF EXISTS `community`;
 DROP TABLE IF EXISTS `user`;
 DROP TABLE IF EXISTS `sys_config`;
 DROP TABLE IF EXISTS `credit_policy`;
@@ -52,7 +54,7 @@ CREATE TABLE `user` (
     `phone`         VARCHAR(20)     NOT NULL                COMMENT '手机号，登录名',
     `password_hash` VARCHAR(100)    NOT NULL                COMMENT 'BCrypt 哈希（$2a$10$ 开头，60 位）',
     `avatar_url`    VARCHAR(255)             DEFAULT NULL   COMMENT '头像地址',
-    `community`     VARCHAR(64)              DEFAULT NULL   COMMENT '所属社区（本课题不做地图，社区用枚举串）',
+    `community_id`  BIGINT UNSIGNED          DEFAULT NULL   COMMENT '所属社区，引用 community.id；NULL = 未填写，不参与同小区优先排序',
     `credit_score`  INT             NOT NULL DEFAULT 80     COMMENT '信誉分，初始值取 credit_policy.init_score',
     `status`        VARCHAR(16)     NOT NULL DEFAULT 'NORMAL' COMMENT 'NORMAL 正常 / DISABLED 禁用',
     `last_login_at` DATETIME                 DEFAULT NULL   COMMENT '最近登录时间',
@@ -62,7 +64,7 @@ CREATE TABLE `user` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_user_phone` (`phone`) COMMENT '登录名唯一；软删后手机号仍占用，不开放二次注册（毕设取舍）',
     KEY `idx_user_status` (`status`)     COMMENT '管理端按状态筛选用户',
-    KEY `idx_user_community` (`community`) COMMENT '按社区筛人（推荐冷启动用）',
+    KEY `idx_user_community` (`community_id`) COMMENT '按社区筛人（推荐冷启动用）',
     CONSTRAINT `ck_user_credit` CHECK (`credit_score` BETWEEN 0 AND 100)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户账号表';
 
@@ -96,11 +98,44 @@ CREATE TABLE `user_role` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户角色关联表';
 
 -- ===========================================================================
--- 二、类目与物品
+-- 二、社区字典（user / item 共用）
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
--- 4. category 物品类目表
+-- 4. community 社区字典表
+-- 为什么要有这张表（把"社区"从自由文本升级为字典引用）：
+--   1) 别名歧义：甲写"阳光花园"、乙写"阳光花园小区"，字符串相等比较会判成两个社区，
+--      同小区的人互相看不到对方的物品。字典化后所有人从下拉选同一个 id，比较退化为整数相等。
+--   2) 可管理：停用某小区后不再出现在下拉里，历史数据保留（不物理删除）。
+--   3) 可排序：列表/推荐的"同小区 > 同片区 > 其他"三档，靠 community_id 与 district 两个等值
+--      判断就能表达，不需要坐标、不需要距离计算（需求总结 §10 明确"地图选址、距离排序 → 不做"）。
+-- 为什么 district 只存字符串而不是外键到"片区表"：片区不发号、不单独管理，只用于第二档排序，
+--   一个字符串足够；真需要片区管理时再加表，不提前抽象。
+-- 为什么 user.community_id 可空、item.community_id 不可空：注册不卡壳（不填则不启用优先档）；
+--   物品必须能说清在哪个小区，否则"就近"无从谈起。
+-- ---------------------------------------------------------------------------
+CREATE TABLE `community` (
+    `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `name`        VARCHAR(64)     NOT NULL                COMMENT '小区名，如 阳光花园',
+    `district`    VARCHAR(64)     NOT NULL                COMMENT '所属片区/街道，用于排序第二档"同片区"',
+    `city`        VARCHAR(64)     NOT NULL DEFAULT '本市'  COMMENT '所属城市',
+    `alias`       VARCHAR(255)             DEFAULT NULL   COMMENT '别名，英文逗号分隔（仅管理端搜索用，不参与匹配）',
+    `enabled`     TINYINT         NOT NULL DEFAULT 1      COMMENT '1 可选 / 0 停用（不再出现在下拉，历史引用保留）',
+    `sort_no`     INT             NOT NULL DEFAULT 0      COMMENT '下拉展示顺序，越小越前',
+    `created_at`  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_community_city_district_name` (`city`, `district`, `name`) COMMENT '同城同片区内小区名唯一（从源头消灭别名重复登记）',
+    KEY `idx_community_district` (`district`) COMMENT '同片区排序（列表页第二档）',
+    KEY `idx_community_enabled` (`enabled`, `sort_no`) COMMENT '下拉只查启用项并按 sort_no 排序',
+    CONSTRAINT `ck_community_enabled` CHECK (`enabled` IN (0, 1))
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '社区字典表';
+-- ===========================================================================
+-- 三、类目与物品
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- 5. category 物品类目表
 -- 用途：两级树。loss_coef 是该类目的损耗系数（对应 loss.coef.category），
 --       放在类目上而不是配置表里 —— 因为它是"随类目走的属性"，不是全局阈值。
 -- ---------------------------------------------------------------------------
@@ -123,7 +158,7 @@ CREATE TABLE `category` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '物品类目表';
 
 -- ---------------------------------------------------------------------------
--- 5. item 物品表
+-- 6. item 物品表
 -- 用途：待租物品。价格三件套（日租金/押金/逾期费率）在发布时确定；
 --       订单创建时会把这三个值【快照】进 rental_order，之后改价不影响历史订单。
 -- loss_value：该物品的累计损耗值 L ∈ [0,1]，达 loss.threshold.maintain/repair 触发提醒。
@@ -135,7 +170,7 @@ CREATE TABLE `item` (
     `title`          VARCHAR(64)     NOT NULL               COMMENT '标题',
     `description`    VARCHAR(1000)            DEFAULT NULL  COMMENT '描述（推荐内容特征的来源）',
     `cover_url`      VARCHAR(255)             DEFAULT NULL  COMMENT '封面图（= item_image 里 id 最小的一张，冗余存一份以免列表页 join）',
-    `community`      VARCHAR(64)     NOT NULL DEFAULT '默认社区' COMMENT '所在社区（本课题用枚举串代替地图）',
+    `community_id`   BIGINT UNSIGNED NOT NULL               COMMENT '所在社区，引用 community.id（发布时必填）',
     `daily_price`    DECIMAL(10, 2)  NOT NULL               COMMENT '日租金',
     `deposit`        DECIMAL(10, 2)  NOT NULL DEFAULT 0.00  COMMENT '押金',
     `overdue_rate`   DECIMAL(6, 4)   NOT NULL DEFAULT 0.5000 COMMENT '逾期费率（×日租金/天），须落在 fee_policy 的 [min,max] 内',
@@ -153,7 +188,7 @@ CREATE TABLE `item` (
     KEY `idx_item_owner` (`owner_id`)                COMMENT '我的物品列表',
     KEY `idx_item_status_category` (`status`, `category_id`) COMMENT '列表页：在架 + 分类筛选（最常用组合）',
     KEY `idx_item_category` (`category_id`)          COMMENT '纯分类筛选 / 推荐内容特征',
-    KEY `idx_item_community` (`community`)           COMMENT '同社区优先',
+    KEY `idx_item_community` (`community_id`)        COMMENT '同小区筛选与排序（列表页第一排序档）',
     CONSTRAINT `ck_item_daily_price` CHECK (`daily_price` > 0),
     CONSTRAINT `ck_item_deposit` CHECK (`deposit` >= 0),
     CONSTRAINT `ck_item_overdue_rate` CHECK (`overdue_rate` >= 0),
@@ -182,11 +217,11 @@ CREATE TABLE `item_image` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '物品图片表';
 
 -- ===========================================================================
--- 三、订单与时段占用（K2 核心）
+-- 四、订单与时段占用（K2 核心）
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
--- 6. rental_order 订单表
+-- 7. rental_order 订单表
 -- 用途：一笔租借。含双边角色（owner_id / renter_id）、租期半开区间 [start_date, end_date)、
 --       状态机、以及三个价格快照。
 -- 命名：需求总结写 order，实际用 rental_order —— order 是 SQL 保留字。
@@ -231,7 +266,7 @@ CREATE TABLE `rental_order` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '订单表';
 
 -- ---------------------------------------------------------------------------
--- 7. order_occupancy 时段占用表【K2 最后防线】
+-- 8. order_occupancy 时段占用表【K2 最后防线】
 -- 用途：一笔跨 N 天的订单展开成 N 行，每行代表"某物品的某一天已被占用"。
 --       唯一索引 uk_occupancy 让并发插入在同一 (item_id, occupy_date) 上必然冲突，
 --       因此无论应用层预检 / 分布式锁如何失效，数据库都不会被超卖。
@@ -252,11 +287,11 @@ CREATE TABLE `order_occupancy` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '物品时段占用表（逐日展开）';
 
 -- ===========================================================================
--- 四、结算与费用流水（K3 核心）
+-- 五、结算与费用流水（K3 核心）
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
--- 8. settlement 结算单表
+-- 9. settlement 结算单表
 -- 用途：一单一结算（uk_order_id），结算单号唯一（uk_settle_no）保证幂等。
 -- 公式：应退押金 = 押金 − 逾期费 − 损耗费，下限 0。
 -- ---------------------------------------------------------------------------
@@ -286,7 +321,7 @@ CREATE TABLE `settlement` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '结算单表';
 
 -- ---------------------------------------------------------------------------
--- 9. fee_flow 资金流水表
+-- 10. fee_flow 资金流水表
 -- 用途：把结算拆成可对账的流水条目（租金/押金/逾期费/损耗费/退款），
 --       毕设不接真实支付，这里记录"账面流水"，供演示与论文的账目推演。
 -- ---------------------------------------------------------------------------
@@ -309,11 +344,11 @@ CREATE TABLE `fee_flow` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '资金流水表';
 
 -- ===========================================================================
--- 五、信誉与损耗（K4 / K6）
+-- 六、信誉与损耗（K4 / K6）
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
--- 10. credit_log 信誉分变动流水
+-- 11. credit_log 信誉分变动流水
 -- 用途：每一次加减分一条记录，含前值/后值，可完整回溯（论文里"信誉分可审计"的证据）。
 -- uk_credit_biz：同一用户在同一订单上的同一原因只能记一次 —— 防定时任务重跑、
 --                防用户连点两次"确认归还"导致双倍加减分。
@@ -337,7 +372,7 @@ CREATE TABLE `credit_log` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '信誉分变动流水表';
 
 -- ---------------------------------------------------------------------------
--- 11. loss_log 损耗记录表
+-- 12. loss_log 损耗记录表
 -- 用途：每次归还算一次 w = 租期系数 × 类目系数 × 归还状态系数，
 --       记录本次 w、累计前后的 L、以及触发的动作（保养/检修）。
 -- ---------------------------------------------------------------------------
@@ -363,11 +398,11 @@ CREATE TABLE `loss_log` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '损耗记录表';
 
 -- ===========================================================================
--- 六、纠纷与消息
+-- 七、纠纷与消息
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
--- 12. appeal 纠纷申诉表
+-- 13. appeal 纠纷申诉表
 -- 用途：订单纠纷裁决。状态单向：PENDING → ACCEPTED / REJECTED。
 -- ---------------------------------------------------------------------------
 CREATE TABLE `appeal` (
@@ -389,7 +424,7 @@ CREATE TABLE `appeal` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '纠纷申诉表';
 
 -- ---------------------------------------------------------------------------
--- 13. message 站内消息表
+-- 14. message 站内消息表
 -- 用途：订单状态变更 / 信誉变动 / 检修提醒的通知。不做实时推送（不做 IM）。
 -- ---------------------------------------------------------------------------
 CREATE TABLE `message` (
@@ -409,7 +444,7 @@ CREATE TABLE `message` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '站内消息表';
 
 -- ===========================================================================
--- 七、规则外置（配置表，对应需求总结 §5 的 27 个键）
+-- 八、规则外置（配置表，对应需求总结 §5 的 27 个键）
 -- 设计取舍：
 --   · 同类同构的参数 → 结构化单行表（credit_policy / fee_policy / loss_policy）
 --     好处：类型是 DECIMAL/INT，不会把 0.5 存成字符串再解析；改一个阈值 = UPDATE 一列。
@@ -419,7 +454,7 @@ CREATE TABLE `message` (
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
--- 14. credit_policy 信誉策略（单行）
+-- 15. credit_policy 信誉策略（单行）
 -- ---------------------------------------------------------------------------
 CREATE TABLE `credit_policy` (
     `id`                          TINYINT       NOT NULL DEFAULT 1    COMMENT '固定为 1，单行表',
@@ -432,9 +467,9 @@ CREATE TABLE `credit_policy` (
     `penalty_overdue_heavy`       INT           NOT NULL DEFAULT -10  COMMENT 'credit.penalty.overdue_heavy 严重逾期（>3 天）每天扣分，负值',
     `penalty_damage`              INT           NOT NULL DEFAULT -10  COMMENT 'credit.penalty.damage 损坏扣分',
     `penalty_cancel_after_confirm` INT          NOT NULL DEFAULT -3   COMMENT 'credit.penalty.cancel_after_confirm 确认后取消扣分',
-    `tier_free_deposit_min`       INT           NOT NULL DEFAULT 80   COMMENT 'credit.tier.free_deposit 免押金门槛（≥）',
+    `tier_free_deposit_min`       INT           NOT NULL DEFAULT 95   COMMENT 'credit.tier.free_deposit 免押金门槛（≥）；母版为 80，本项目上调至 95（见需求总结 §14.1）',
     `tier_normal_min`             INT           NOT NULL DEFAULT 60   COMMENT 'credit.tier.normal 正常租用区间下界',
-    `tier_normal_max`             INT           NOT NULL DEFAULT 79   COMMENT 'credit.tier.normal 正常租用区间上界',
+    `tier_normal_max`             INT           NOT NULL DEFAULT 94   COMMENT 'credit.tier.normal 正常租用区间上界；母版为 79，因免押门槛上调而放宽到 94（避免 80-94 空档）',
     `tier_deposit_up_min`         INT           NOT NULL DEFAULT 40   COMMENT 'credit.tier.deposit_up 押金上浮区间下界',
     `tier_deposit_up_max`         INT           NOT NULL DEFAULT 59   COMMENT 'credit.tier.deposit_up 押金上浮区间上界',
     `tier_deposit_up_ratio`       DECIMAL(4, 2) NOT NULL DEFAULT 1.50 COMMENT 'credit.tier.deposit_up 押金上浮系数 ×1.5',
@@ -446,7 +481,7 @@ CREATE TABLE `credit_policy` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '信誉策略配置（单行）';
 
 -- ---------------------------------------------------------------------------
--- 15. fee_policy 费用策略（单行）
+-- 16. fee_policy 费用策略（单行）
 -- ---------------------------------------------------------------------------
 CREATE TABLE `fee_policy` (
     `id`                  TINYINT       NOT NULL DEFAULT 1    COMMENT '固定为 1，单行表',
@@ -469,7 +504,7 @@ CREATE TABLE `fee_policy` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '费用策略配置（单行）';
 
 -- ---------------------------------------------------------------------------
--- 16. loss_policy 损耗策略（单行）
+-- 17. loss_policy 损耗策略（单行）
 -- ---------------------------------------------------------------------------
 CREATE TABLE `loss_policy` (
     `id`                   TINYINT       NOT NULL DEFAULT 1      COMMENT '固定为 1，单行表',
@@ -493,7 +528,7 @@ CREATE TABLE `loss_policy` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '损耗策略配置（单行）';
 
 -- ---------------------------------------------------------------------------
--- 17. sys_config 系统参数（键值）
+-- 18. sys_config 系统参数（键值）
 -- 用途：放异构零散参数 —— 推荐权重/衰减半衰期/热度窗口/锁 TTL/扫描 cron。
 -- ---------------------------------------------------------------------------
 CREATE TABLE `sys_config` (

@@ -7,8 +7,10 @@ import com.duyikang.rental.module.appeal.mapper.AppealMapper;
 import com.duyikang.rental.module.credit.entity.CreditPolicy;
 import com.duyikang.rental.module.credit.mapper.CreditLogMapper;
 import com.duyikang.rental.module.credit.mapper.CreditPolicyMapper;
+import com.duyikang.rental.module.item.entity.Community;
 import com.duyikang.rental.module.item.entity.Item;
 import com.duyikang.rental.module.item.mapper.CategoryMapper;
+import com.duyikang.rental.module.item.mapper.CommunityMapper;
 import com.duyikang.rental.module.item.mapper.ItemImageMapper;
 import com.duyikang.rental.module.item.mapper.ItemMapper;
 import com.duyikang.rental.module.loss.entity.LossPolicy;
@@ -43,7 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 18 张表实体 + Mapper 集成测试。
+ * 19 张表实体 + Mapper 集成测试。
  *
  * <p>连真实 {@code rental} 库（种子数据来自 {@code backend/sql/02-data.sql}），
  * 每个测试方法自带 {@code @Transactional}，结束后自动回滚，不污染库。</p>
@@ -53,13 +55,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 @SpringBootTest
 @Transactional
-@DisplayName("Mapper 层：18 张表的映射与约束")
+@DisplayName("Mapper 层：19 张表的映射与约束")
 class MapperIntegrationTest {
 
     @Autowired private UserMapper userMapper;
     @Autowired private RoleMapper roleMapper;
     @Autowired private UserRoleMapper userRoleMapper;
     @Autowired private CategoryMapper categoryMapper;
+    @Autowired private CommunityMapper communityMapper;
     @Autowired private ItemMapper itemMapper;
     @Autowired private ItemImageMapper itemImageMapper;
     @Autowired private RentalOrderMapper rentalOrderMapper;
@@ -78,11 +81,12 @@ class MapperIntegrationTest {
     @Autowired private JdbcTemplate jdbcTemplate;
 
     @Test
-    @DisplayName("selectCount_18张表_与种子数据行数一致")
+    @DisplayName("selectCount_19张表_与种子数据行数一致")
     void selectCount_allTables_equalsSeedData() {
         assertThat(userMapper.selectCount(null)).isEqualTo(4L);
         assertThat(roleMapper.selectCount(null)).isEqualTo(2L);
         assertThat(userRoleMapper.selectCount(null)).isEqualTo(5L);
+        assertThat(communityMapper.selectCount(null)).isEqualTo(6L);
         assertThat(categoryMapper.selectCount(null)).isEqualTo(11L);
         assertThat(itemMapper.selectCount(null)).isEqualTo(7L);
         assertThat(itemImageMapper.selectCount(null)).isEqualTo(13L);
@@ -101,6 +105,18 @@ class MapperIntegrationTest {
         assertThat(sysConfigMapper.selectCount(null)).isEqualTo(9L);
     }
 
+    @Test
+    @DisplayName("社区引用_user与item_映射为communityId")
+    void communityId_mapped_bothSides() {
+        // 物品 1 属于阳光花园（id=1），用户 4 属于绿洲家园（id=2）
+        assertThat(itemMapper.selectById(1L).getCommunityId()).isEqualTo(1L);
+        assertThat(userMapper.selectById(4L).getCommunityId()).isEqualTo(2L);
+        // 停用的小区（紫竹园 id=6）依然能被实体读出来：停用只影响下拉，不影响历史引用
+        Community zizhu = communityMapper.selectById(6L);
+        assertThat(zizhu).isNotNull();
+        assertThat(zizhu.getEnabled()).isZero();
+        assertThat(zizhu.getDistrict()).isEqualTo("城北街道");
+    }
     @Test
     @DisplayName("金额字段_读取_DECIMAL精度与标度不丢")
     void moneyFields_read_keepScale() {

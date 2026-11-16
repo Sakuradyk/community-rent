@@ -45,9 +45,10 @@ public class User {
     private String avatarUrl;
 
     /**
-     * 所属社区（本课题不做地图，社区用枚举串）
+     * 所属社区，引用 community.id；NULL = 未填写，不参与同小区优先排序
      */
-    private String community;
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long communityId;
 
     /**
      * 信誉分，初始值取 credit_policy.init_score

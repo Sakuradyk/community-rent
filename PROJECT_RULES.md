@@ -12,7 +12,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.7 · 2026-11-11 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
+> **版本**：v1.8 · 2026-11-16 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
 
 ---
 
@@ -444,6 +444,14 @@ spring:
 - 建库建表统一 `DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`（已执行：`CREATE DATABASE rental ... utf8mb4`）。
 - **两种「utf8」别混**：SQL 里写字符集名 → `utf8mb4`；JDBC URL 的 `characterEncoding` → `UTF-8`（Java 字符集名，详见 D10）。两处不一致不报错，但排查时极易误判。
 
+### 6.5 社区（`community_id`）
+
+- 社区统一存 `community_id BIGINT`，指向 `community` 字典；**禁止**再出现 `community VARCHAR` 形式的社区名。
+- `user.community_id` **可空**（不填 = 不参与"同小区优先"）；`item.community_id` **必填**。
+- "就近"一律用整数等值分档：`同小区 > 同片区 > 其他`，**不做距离计算、不引地图**（需求总结 §10 边界）。
+- 排序开关 `community.priority.enabled`（`sys_config`，默认 1）：设为 0 时必须退回原排序，这是论文消融实验的入口，**不许删掉这个分支**。
+- 关联完整性由 `A18`（物品必须指向真实社区）/ `A19`（用户非空时必须存在）两条断言巡检，不建物理外键。
+
 ---
 
 ## 7. 接口与响应规范
@@ -616,7 +624,7 @@ public Long createOrder(OrderCreateDTO dto) {
 | 信誉分 | `credit.init` / `.max` / `.min` | 80 / 100 / 0 |
 | 信誉分 | `credit.reward.on_time` / `.daily_cap` | +2 / +4 |
 | 信誉分 | `credit.penalty.overdue_light` / `.overdue_heavy` / `.damage` / `.cancel_after_confirm` | −5 / −10 / −10 / −3 |
-| 信誉档 | 免押 ≥80、正常 60–79、上浮 40–59（×1.5）、暂停 <40 | — |
+| 信誉档 | 免押 ≥95、正常 60–94、上浮 40–59（×1.5）、暂停 <40 | — |
 | 费用 | `fee.overdue.tier1_days` / `.tier1_rate` / `.tier2_rate` | 3 / 0.5 / 1.0 |
 | 费用 | `fee.overdue_rate.min` / `.max` | 0.1 / 2.0 |
 | 费用 | `fee.daily_price.min` / `.max` | 1 / 500 |
@@ -625,6 +633,7 @@ public Long createOrder(OrderCreateDTO dto) {
 | 推荐 | `recommend.w.cf` / `.content` / `.heat` | 0.6 / 0.3 / 0.1 |
 | 推荐 | `recommend.decay.half_life`（天） | 30 |
 | 订单 | `order.lock.ttl`（秒） | 10 |
+| 社区 | `community.priority.enabled`（列表/推荐「同小区 > 同片区」优先档开关，0 = 关闭，供消融对比） | 1 |
 | 基础设施 | `file.root` / `.access-path` / `.max-size-mb` / `.allowed-ext` | `uploads` / `/uploads` / 5 / `jpg,jpeg,png,webp` |
 
 **实现方式**（本项目**没有** `spring-cloud` 依赖，`@RefreshScope` 用不了，别写）：
@@ -777,7 +786,7 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | `社区物品租用平台-需求总结.md` | 需求清单 FR、优先级、边界判定、20 周排期 |
 | `docs/AI协作开发手册.md` | **方法论**：七步闭环、四类提示词模板、边界用例清单、上下文管理、答辩防守。**不含本文件的规则副本**——同一规则只在本文件维护，两处冲突时以本文件为准 |
 | `项目进度.md` | **做到哪了**：三条硬指标现状、已完成项与验证证据、未完成项依赖顺序、环境速查、已知坑（每次可提交单元完成后更新） |
-| `docs/数据库设计.md` | 表结构、索引、字段理由、K 点约束落地对照、实测记录（已完成，18 表） |
+| `docs/数据库设计.md` | 表结构、索引、字段理由、K 点约束落地对照、实测记录（已完成，19 表） |
 | `docs/接口文档.md` | REST 契约、错误码（待产出） |
 | `docs/测试用例.md` | 边界用例清单（边开发边填） |
 | `docs/notes/*.md` | 各 K 点技术笔记（论文素材） |
@@ -803,3 +812,4 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-11 | 项目负责人 | **v1.5（文档去重，确立单一真源）**：①`AI协作开发手册.md` 由根目录移入 `docs/`，瘦身 v1.0→v2.0（443 行 → 379 行），删除与本文件重复的四块（G1–G5 闸门表、`PROJECT_RULES` 模板骨架、14 条版本陷阱、一页速查图）与已完成的「今天就能做的 5 件事」；②手册新增「与本文件分工」声明，**同一规则只在本文件维护，冲突以本文件为准**；③修正手册两处与本文件的冲突（「每个能跑的版本打 tag、`wip` 也可打」→ 按 §14.2/§14.4 仅 K 点完成时打 tag、`wip` 不打；「用 Swagger 验证接口」→ 项目无该依赖，改 `curl` + 断言响应体 `code`）；④§4.1 目录树同步：移除根目录手册、补 `项目进度.md` 与 `sql/03-verify.sql`；⑤§15 索引行同步新路径与定位 |
 | 2026-11-11 | 项目负责人 | **v1.6（实体层落地）**：①§4.1 目录树 `module/` 下新增 `system/`（`sys_config` 键值参数归属，原先 18 张表里这张无处安放）；②§12 新增两条测试前提——**Mockito 必须用 `mock-maker-subclass`**（本机 JDK `17+35` 无可用 agent 自挂载，inline mock maker 会让每个 `@SpringBootTest` 报 `Could not initialize inline Byte Buddy mock maker`）、集成测试连真实库 + `@Transactional` 回滚且禁用 H2；③配套实绩：18 实体 + 18 Mapper + `MybatisPlusConfig`（分页插件显式注册）+ `MapperIntegrationTest` 8 例，测试总数 20 → **28/28** |
 | 2026-11-11 | 项目负责人 | **v1.7（文件上传落地）**：①§4.1 `module/system/` 注释扩为「系统支撑：配置参数 + 文件存储」，`FileController`/`UploadVO` 归此包（不新建 `module/file`，避免目录树膨胀）；②§9 配置清单追加 `file.*` 四项，并新增「唯一的例外：基础设施配置」——走 yml 不进策略表的判定标准是**「这个值变了，租用/计费/信誉/损耗的行为会不会变」**；③配套实绩：`FileStorageProperties` + `FileStorageUtil`（UUID 重命名防路径穿越）+ `WebMvcConfig`（`/uploads/**` 静态映射）+ `POST /api/files/upload`，`GlobalExceptionHandler` 补 `MaxUploadSizeExceededException`→2005，`SecurityConfig` 放行 `/uploads/**`（`<img>` 带不了 Authorization 头）；`FileStorageUtilTest` 7 例，测试总数 28 → **35/35** |
+| 2026-11-16 | 项目负责人 | **v1.8（社区字典化）**：①§6 新增 6.5——社区统一存 `community_id`，禁止再出现社区字符串；`user.community_id` 可空、`item.community_id` 必填；就近一律整数等值分档「同小区 > 同片区 > 其他」，不做距离/地图；排序开关 `community.priority.enabled` 为 0 时必须退回原排序（论文消融入口，不许删分支）；②§9 配置清单增 `community.priority.enabled`（默认 1），信誉档门限改为「免押 ≥95、正常 60–94」；③§15 `docs/数据库设计.md` 更新为 19 表；④配套实绩：`community` 表 + `uk_community_city_district_name`、`user`/`item` 改列、`GET /api/communities`（匿名可读）、`CommunityServiceTest` 1 例，`03-verify.sql` 19 断言全 PASS、14 条负向全被拦，测试总数 35 → **37/37**；⑤口径变更已备案：需求总结 §14.1 两条（免押门槛 80→95、社区字段字典化） |

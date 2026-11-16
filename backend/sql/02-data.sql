@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 社区物品租用平台 · 初始化数据 02-data.sql
 -- 依赖：01-schema.sql 已执行
--- 版本：v1.0   日期：2026-11-11
+-- 版本：v1.1   日期：2026-11-16
 -- ----------------------------------------------------------------------------
 -- 口令说明（明文仅本文件注释可见，库里只存 BCrypt 哈希）：
 --   管理员  admin      / admin123   → $2a$10$.Fd3nrnJjy3D2fcDfNDUiu8UcUYZzOaMzjzX739pb/1nVcHuar/T.
@@ -20,13 +20,25 @@ INSERT INTO `role` (`id`, `code`, `name`, `description`) VALUES
 (2, 'ADMIN', '管理员',   '审核物品、处理申诉、执行逾期扫描');
 
 -- ---------------------------------------------------------------------------
--- 2. 用户（口令见文件头注释）
+-- 2. 社区字典（用户与物品共用；必须早于用户与物品插入，供 community_id 引用）
+--    1/2/3 号同在"城东街道"，用于演示排序第二档「同片区」；
+--    6 号 enabled = 0，用于演示「停用小区不再出现在下拉里，但历史引用仍然有效」。
 -- ---------------------------------------------------------------------------
-INSERT INTO `user` (`id`, `nickname`, `phone`, `password_hash`, `community`, `credit_score`, `status`) VALUES
-(1, '平台管理员', '13800000000', '$2a$10$.Fd3nrnJjy3D2fcDfNDUiu8UcUYZzOaMzjzX739pb/1nVcHuar/T.', '阳光社区', 100, 'NORMAL'),
-(2, '张伟',       '13800000001', '$2a$10$8mBXeUf33mA0s8iUwDzX6.gFxjc7XiFxVPY2G1YAph/ERMTa.UZAy', '阳光社区', 82,  'NORMAL'),
-(3, '李娜',       '13800000002', '$2a$10$8mBXeUf33mA0s8iUwDzX6.gFxjc7XiFxVPY2G1YAph/ERMTa.UZAy', '阳光社区', 74,  'NORMAL'),
-(4, '王强',       '13800000003', '$2a$10$8mBXeUf33mA0s8iUwDzX6.gFxjc7XiFxVPY2G1YAph/ERMTa.UZAy', '绿洲社区', 45,  'NORMAL');
+INSERT INTO `community` (`id`, `name`, `district`, `city`, `alias`, `enabled`, `sort_no`) VALUES
+(1, '阳光花园', '城东街道', '本市', '阳光社区,阳光花园小区,阳光花园东区', 1, 10),
+(2, '绿洲家园', '城东街道', '本市', '绿洲社区',                        1, 20),
+(3, '金桂苑',   '城东街道', '本市', NULL,                              1, 30),
+(4, '湖畔小区', '城南街道', '本市', NULL,                              1, 40),
+(5, '学府名居', '城西街道', '本市', NULL,                              1, 50),
+(6, '紫竹园',   '城北街道', '本市', NULL,                              0, 60);
+-- ---------------------------------------------------------------------------
+-- 3. 用户（口令见文件头注释）
+-- ---------------------------------------------------------------------------
+INSERT INTO `user` (`id`, `nickname`, `phone`, `password_hash`, `community_id`, `credit_score`, `status`) VALUES
+(1, '平台管理员', '13800000000', '$2a$10$.Fd3nrnJjy3D2fcDfNDUiu8UcUYZzOaMzjzX739pb/1nVcHuar/T.', 1, 100, 'NORMAL'),
+(2, '张伟',       '13800000001', '$2a$10$8mBXeUf33mA0s8iUwDzX6.gFxjc7XiFxVPY2G1YAph/ERMTa.UZAy', 1, 82,  'NORMAL'),
+(3, '李娜',       '13800000002', '$2a$10$8mBXeUf33mA0s8iUwDzX6.gFxjc7XiFxVPY2G1YAph/ERMTa.UZAy', 1, 74,  'NORMAL'),
+(4, '王强',       '13800000003', '$2a$10$8mBXeUf33mA0s8iUwDzX6.gFxjc7XiFxVPY2G1YAph/ERMTa.UZAy', 2, 45,  'NORMAL');
 
 -- 管理员同时具备 USER 与 ADMIN，普通用户只有 USER
 INSERT INTO `user_role` (`user_id`, `role_id`) VALUES
@@ -34,7 +46,7 @@ INSERT INTO `user_role` (`user_id`, `role_id`) VALUES
 (2, 1), (3, 1), (4, 1);
 
 -- ---------------------------------------------------------------------------
--- 3. 类目（两级树；loss_coef 对应 loss.coef.category）
+-- 4. 类目（两级树；loss_coef 对应 loss.coef.category）
 -- ---------------------------------------------------------------------------
 INSERT INTO `category` (`id`, `name`, `parent_id`, `level`, `loss_coef`, `sort_no`) VALUES
 (1, '电子数码', 0, 1, 0.0300, 10),
@@ -50,16 +62,16 @@ INSERT INTO `category` (`id`, `name`, `parent_id`, `level`, `loss_coef`, `sort_n
 (11, '小说',   4, 2, 0.0060, 41);
 
 -- ---------------------------------------------------------------------------
--- 4. 物品（不同 owner、不同类目、不同状态，覆盖列表/筛选/推荐演示）
+-- 5. 物品（不同 owner、不同类目、不同状态，覆盖列表/筛选/推荐演示）
 -- ---------------------------------------------------------------------------
-INSERT INTO `item` (`id`, `owner_id`, `category_id`, `title`, `description`, `cover_url`, `community`, `daily_price`, `deposit`, `overdue_rate`, `loss_value`, `status`, `rent_count`, `view_count`) VALUES
-(1, 2, 8, '双人帐篷（3 秒速开）', '适合春日郊野露营，含防潮垫，轻微使用痕迹', '/uploads/202611/tent-01.jpg', '阳光社区', 25.00, 100.00, 0.50, 0.1200, 'ON_SHELF', 6, 88),
-(2, 2, 6, '索尼 A6400 微单套机', '含 16-50 套头与两块电池，仅限同城当面交接', '/uploads/202611/camera-01.jpg', '阳光社区', 60.00, 500.00, 0.80, 0.2500, 'ON_SHELF', 3, 152),
-(3, 3, 10, '博世电钻套装', '含 12 支钻头，适合家具组装与墙面打孔', '/uploads/202611/drill-01.jpg', '阳光社区', 15.00, 80.00, 0.50, 0.0800, 'ON_SHELF', 9, 61),
-(4, 3, 11, '《三体》全集（三册）', '书脊完好，无笔记划线', '/uploads/202611/book-01.jpg', '阳光社区', 3.00, 20.00, 0.30, 0.0300, 'ON_SHELF', 2, 34),
-(5, 4, 9, '羽绒睡袋（-5℃）', '适合秋冬露营，已送洗', '/uploads/202611/bag-01.jpg', '绿洲社区', 18.00, 120.00, 0.50, 0.1500, 'ON_SHELF', 1, 27),
-(6, 4, 7, 'AirPods Pro 2', '含充电盒与耳塞三副', '/uploads/202611/airpods-01.jpg', '绿洲社区', 12.00, 200.00, 0.80, 0.4000, 'PENDING', 0, 12),
-(7, 2, 2, '折叠营地车', '承重 80kg，适合搬运露营装备', '/uploads/202611/cart-01.jpg', '阳光社区', 20.00, 150.00, 0.50, 0.0500, 'ON_SHELF', 4, 45);
+INSERT INTO `item` (`id`, `owner_id`, `category_id`, `title`, `description`, `cover_url`, `community_id`, `daily_price`, `deposit`, `overdue_rate`, `loss_value`, `status`, `rent_count`, `view_count`) VALUES
+(1, 2, 8, '双人帐篷（3 秒速开）', '适合春日郊野露营，含防潮垫，轻微使用痕迹', '/uploads/202611/tent-01.jpg', 1, 25.00, 100.00, 0.50, 0.1200, 'ON_SHELF', 6, 88),
+(2, 2, 6, '索尼 A6400 微单套机', '含 16-50 套头与两块电池，仅限同城当面交接', '/uploads/202611/camera-01.jpg', 1, 60.00, 500.00, 0.80, 0.2500, 'ON_SHELF', 3, 152),
+(3, 3, 10, '博世电钻套装', '含 12 支钻头，适合家具组装与墙面打孔', '/uploads/202611/drill-01.jpg', 1, 15.00, 80.00, 0.50, 0.0800, 'ON_SHELF', 9, 61),
+(4, 3, 11, '《三体》全集（三册）', '书脊完好，无笔记划线', '/uploads/202611/book-01.jpg', 1, 3.00, 20.00, 0.30, 0.0300, 'ON_SHELF', 2, 34),
+(5, 4, 9, '羽绒睡袋（-5℃）', '适合秋冬露营，已送洗', '/uploads/202611/bag-01.jpg', 2, 18.00, 120.00, 0.50, 0.1500, 'ON_SHELF', 1, 27),
+(6, 4, 7, 'AirPods Pro 2', '含充电盒与耳塞三副', '/uploads/202611/airpods-01.jpg', 2, 12.00, 200.00, 0.80, 0.4000, 'PENDING', 0, 12),
+(7, 2, 2, '折叠营地车', '承重 80kg，适合搬运露营装备', '/uploads/202611/cart-01.jpg', 1, 20.00, 150.00, 0.50, 0.0500, 'ON_SHELF', 4, 45);
 
 -- ---------------------------------------------------------------------------
 -- 4.1 物品图片（每件 ≥1 张，id 升序即展示顺序；cover_url 必须等于第一张）
@@ -80,14 +92,17 @@ INSERT INTO `item_image` (`item_id`, `url`) VALUES
 (7, '/uploads/202611/cart-02.jpg');
 
 -- ---------------------------------------------------------------------------
--- 5. 策略表（单行，值与需求总结 §5 默认值一致）
+-- 6. 策略表（单行；默认值与需求总结 §5 一致，仅 credit_policy 的免押门槛有意偏离，见下行注释）
 -- ---------------------------------------------------------------------------
-INSERT INTO `credit_policy` (`id`) VALUES (1);
+-- credit_policy 显式写值：其余列走 DDL 默认值，只有这两列有意偏离母版（见需求总结 §14.1 偏差记录）
+--   tier_free_deposit_min: 80 → 95（免押要攒，新用户 80 分不免押）
+--   tier_normal_max:       79 → 94（把 80–94 收敛进"正常租用"，否则 80–94 会是空档）
+INSERT INTO `credit_policy` (`id`, `tier_free_deposit_min`, `tier_normal_max`) VALUES (1, 95, 94);
 INSERT INTO `fee_policy` (`id`) VALUES (1);
 INSERT INTO `loss_policy` (`id`) VALUES (1);
 
 -- ---------------------------------------------------------------------------
--- 6. 系统参数（异构零散配置）
+-- 7. 系统参数（异构零散配置）
 -- ---------------------------------------------------------------------------
 INSERT INTO `sys_config` (`config_key`, `config_value`, `value_type`, `config_group`, `description`) VALUES
 ('recommend.w.cf',          '0.6',        'DECIMAL', 'recommend', '协同过滤权重'),
@@ -101,7 +116,7 @@ INSERT INTO `sys_config` (`config_key`, `config_value`, `value_type`, `config_gr
 ('order.max_days',          '30',         'INT',     'order',     '单笔订单最长租期（天）');
 
 -- ---------------------------------------------------------------------------
--- 7. 演示订单（覆盖三种"占用形态"，供前端联调与 K2 断言使用）
+-- 8. 演示订单（覆盖三种"占用形态"，供前端联调与 K2 断言使用）
 --    订单 1：COMPLETED —— 终态，占用已释放，结算/流水/信誉/损耗齐全
 --    订单 2：CONFIRMED —— 占用存在，且必须【逐日 3 行】（11-20/21/22）
 --    订单 3：PENDING   —— 不占时段（这是状态机的明确规定）
@@ -147,5 +162,5 @@ INSERT INTO `message` (`user_id`, `type`, `title`, `content`, `biz_type`, `biz_i
 (3, 'ORDER', '押金已退还', '订单 R202610050001 结算完成：租金 75.00，损耗 0.03，退还押金 99.97 元。', 'ORDER', 1);
 
 -- ============================================================================
--- 初始化完成：角色 2 / 用户 4 / 类目 11 / 物品 7 / 策略 3 / 参数 9 / 订单 3
+-- 初始化完成：角色 2 / 社区 6 / 用户 4 / 类目 11 / 物品 7 / 策略 3 / 参数 9 / 订单 3
 -- ============================================================================

@@ -7,8 +7,8 @@
 SET NAMES utf8mb4;
 USE rental;
 
--- A1 表数量必须为 18
-SELECT IF(cnt = 18, 'PASS', 'FAIL') AS `A1_table_count`, cnt AS `actual`
+-- A1 表数量必须为 19
+SELECT IF(cnt = 19, 'PASS', 'FAIL') AS `A1_table_count`, cnt AS `actual`
 FROM (SELECT COUNT(*) AS cnt FROM information_schema.tables
       WHERE table_schema = 'rental' AND table_type = 'BASE TABLE') t;
 
@@ -75,12 +75,13 @@ SELECT IF(COUNT(*) >= 18, 'PASS', 'FAIL') AS `A11_check_constraints`, COUNT(*) A
 FROM information_schema.table_constraints
 WHERE table_schema = 'rental' AND constraint_type = 'CHECK';
 
--- A12 K2/K3/K4 关键唯一键必须存在
-SELECT IF(COUNT(DISTINCT index_name) = 8, 'PASS', 'FAIL') AS `A12_key_unique_index`, COUNT(DISTINCT index_name) AS `actual`
+-- A12 K2/K3/K4 关键唯一键必须存在（9 个：含社区字典的"同城同片区小区名唯一"）
+SELECT IF(COUNT(DISTINCT index_name) = 9, 'PASS', 'FAIL') AS `A12_key_unique_index`, COUNT(DISTINCT index_name) AS `actual`
 FROM information_schema.statistics
 WHERE table_schema = 'rental' AND non_unique = 0
   AND index_name IN ('uk_occupancy', 'uk_order_no', 'uk_settle_no', 'uk_settle_order',
-                     'uk_credit_biz', 'uk_flow_no', 'uk_user_phone', 'uk_config_key');
+                     'uk_credit_biz', 'uk_flow_no', 'uk_user_phone', 'uk_config_key',
+                     'uk_community_city_district_name');
 
 -- A13 没有物理外键（本项目约定由应用层保证）
 SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A13_no_foreign_key`, COUNT(*) AS `actual`
@@ -110,9 +111,22 @@ SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A17_image_path_shape`, COUNT(*) AS `
 FROM item_image
 WHERE url NOT LIKE '/uploads/%' OR CHAR_LENGTH(url) > 255;
 
+-- A18 物品的 community_id 必须指向真实存在的社区（无物理外键，靠本断言兜底）
+SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A18_item_community_exists`, IFNULL(GROUP_CONCAT(i.id), '-') AS `bad_items`
+FROM item i
+LEFT JOIN community c ON c.id = i.community_id
+WHERE c.id IS NULL;
+
+-- A19 用户填了社区就必须真实存在（community_id 允许为 NULL：未填写则不参与同小区优先排序）
+SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A19_user_community_exists`, IFNULL(GROUP_CONCAT(u.id), '-') AS `bad_users`
+FROM `user` u
+LEFT JOIN community c ON c.id = u.community_id
+WHERE u.community_id IS NOT NULL AND c.id IS NULL;
+
 -- 参考信息：各表行数
 SELECT 'user' AS tbl, COUNT(*) AS rows_cnt FROM `user`
 UNION ALL SELECT 'role', COUNT(*) FROM `role`
+UNION ALL SELECT 'community', COUNT(*) FROM `community`
 UNION ALL SELECT 'category', COUNT(*) FROM `category`
 UNION ALL SELECT 'item', COUNT(*) FROM `item`
 UNION ALL SELECT 'item_image', COUNT(*) FROM `item_image`
