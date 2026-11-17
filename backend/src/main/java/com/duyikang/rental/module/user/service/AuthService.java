@@ -3,6 +3,7 @@ package com.duyikang.rental.module.user.service;
 import com.duyikang.rental.module.user.dto.LoginDTO;
 import com.duyikang.rental.module.user.dto.RefreshDTO;
 import com.duyikang.rental.module.user.dto.RegisterDTO;
+import com.duyikang.rental.module.user.dto.ResetPasswordDTO;
 import com.duyikang.rental.module.user.vo.LoginVO;
 
 /**
@@ -36,4 +37,14 @@ public interface AuthService {
 
     /** 登出：删除服务端白名单记录，之后旧 refresh 令牌无法再换新令牌。 */
     void logout();
+
+    /**
+     * 忘记密码：知识校验通过后重设密码，并作废该账号所有已签发的 refresh 令牌。
+     *
+     * <p>校验要素：手机号 + 昵称，若该账号设置过社区还需选对社区。
+     * 三项不匹配统一返回同一个 2001 文案，避免把"手机号是否存在"暴露出去。</p>
+     *
+     * @throws com.duyikang.rental.common.exception.BizException 要素不匹配(2001)、账号被禁用(1006)
+     */
+    void resetPassword(ResetPasswordDTO dto);
 }

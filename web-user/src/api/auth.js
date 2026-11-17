@@ -19,3 +19,10 @@ export function refreshToken(data) {
 export function logout() {
   return request.post('/auth/logout')
 }
+/**
+ * 忘记密码（知识校验式重置）：{ phone, nickname, communityId, newPassword }
+ * 三个要素必须与注册信息一致；成功后该账号所有旧 refresh 令牌立即作废。
+ */
+export function resetPassword(data) {
+  return request.post('/auth/reset-password', data)
+}

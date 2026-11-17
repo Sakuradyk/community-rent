@@ -53,6 +53,9 @@ public class SecurityConfig {
                                 "/api/auth/login",
                                 "/api/auth/register",
                                 "/api/auth/refresh",
+                                // 忘记密码必须匿名可用：用户正是因为进不去才来重置。
+                                // 接口内部做知识校验（手机号+昵称+社区），并把三种不匹配合并成同一句文案。
+                                "/api/auth/reset-password",
                                 "/druid/**",
                                 // 物品图片必须匿名可读：<img src> 无法携带 Authorization 头。
                                 // 这里只暴露 /uploads 下的静态文件，不含任何业务数据（PROJECT_RULES.md §4.6 F1 之外的补充）

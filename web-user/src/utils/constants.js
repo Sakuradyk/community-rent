@@ -5,7 +5,8 @@
 export const STORAGE_KEY = {
   ACCESS: 'rental_access_token',
   REFRESH: 'rental_refresh_token',
-  PROFILE: 'rental_profile'
+  PROFILE: 'rental_profile',
+  REMEMBER: 'rental_remember'
 }
 
 /** 统一响应体里的成功码 */

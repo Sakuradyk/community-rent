@@ -8,6 +8,7 @@ import com.duyikang.rental.module.credit.mapper.CreditPolicyMapper;
 import com.duyikang.rental.module.user.dto.LoginDTO;
 import com.duyikang.rental.module.user.dto.RefreshDTO;
 import com.duyikang.rental.module.user.dto.RegisterDTO;
+import com.duyikang.rental.module.user.dto.ResetPasswordDTO;
 import com.duyikang.rental.module.user.entity.User;
 import com.duyikang.rental.module.user.entity.UserRole;
 import com.duyikang.rental.module.user.mapper.RoleMapper;
@@ -226,5 +227,63 @@ class AuthIntegrationTest {
         BizException e = assertThrows(BizException.class,
                 () -> authService.refresh(new RefreshDTO(vo.refreshToken())));
         assertEquals(1003, e.getCode());
+    }
+
+    @Test
+    @DisplayName("resetPassword_要素齐全_新密码可登录且旧refresh被作废")
+    void resetPassword_matched_setsNewPasswordAndRevokesSessions() {
+        LoginVO vo = authService.register(new RegisterDTO("13900001008", PASSWORD, "测试辛", COMMUNITY_ID));
+        Long userId = vo.user().id();
+        createdUserIds.add(userId);
+        assertTrue(refreshTokenStore.matches(userId, jwtUtil.parse(vo.refreshToken()).getId()),
+                "前置：注册后白名单里应有该用户的 jti");
+
+        authService.resetPassword(new ResetPasswordDTO("13900001008", "测试辛", COMMUNITY_ID, "newPass2026"));
+
+        // 旧密码失效、新密码可登录
+        BizException old = assertThrows(BizException.class,
+                () -> authService.login(new LoginDTO("13900001008", PASSWORD)));
+        assertEquals(1005, old.getCode(), "旧密码必须失效");
+        LoginVO relogin = authService.login(new LoginDTO("13900001008", "newPass2026"));
+        assertEquals(userId, relogin.user().id());
+
+        // 改密意味着原主人可能已失去控制权：旧的 refresh 白名单必须一起清掉
+        BizException reuse = assertThrows(BizException.class,
+                () -> authService.refresh(new RefreshDTO(vo.refreshToken())));
+        assertEquals(1003, reuse.getCode(), "改密后旧 refresh 必须失效");
+    }
+
+    @Test
+    @DisplayName("resetPassword_昵称或社区不匹配_统一返回2001同一句文案")
+    void resetPassword_mismatchedElements_sameParamError() {
+        LoginVO vo = authService.register(new RegisterDTO("13900001009", PASSWORD, "测试壬", COMMUNITY_ID));
+        createdUserIds.add(vo.user().id());
+
+        BizException wrongNickname = assertThrows(BizException.class,
+                () -> authService.resetPassword(new ResetPasswordDTO("13900001009", "别人昵称", COMMUNITY_ID, "newPass2026")));
+        assertEquals(2001, wrongNickname.getCode());
+
+        // 该账号注册时选过社区，故社区也必须匹配
+        BizException wrongCommunity = assertThrows(BizException.class,
+                () -> authService.resetPassword(new ResetPasswordDTO("13900001009", "测试壬", 2L, "newPass2026")));
+        assertEquals(2001, wrongCommunity.getCode());
+
+        BizException unknownPhone = assertThrows(BizException.class,
+                () -> authService.resetPassword(new ResetPasswordDTO("13900009999", "测试壬", COMMUNITY_ID, "newPass2026")));
+        assertEquals(2001, unknownPhone.getCode());
+
+        assertEquals(wrongNickname.getMessage(), unknownPhone.getMessage(),
+                "三种不匹配必须同一句话，否则这个接口就成了手机号/昵称查询器");
+    }
+
+    @Test
+    @DisplayName("resetPassword_没设置社区的账号_只校验手机号与昵称")
+    void resetPassword_withoutCommunity_skipsCommunityCheck() {
+        LoginVO vo = authService.register(new RegisterDTO("13900001010", PASSWORD, "测试癸", null));
+        createdUserIds.add(vo.user().id());
+
+        authService.resetPassword(new ResetPasswordDTO("13900001010", "测试癸", null, "newPass2026"));
+        LoginVO relogin = authService.login(new LoginDTO("13900001010", "newPass2026"));
+        assertEquals(vo.user().id(), relogin.user().id());
     }
 }

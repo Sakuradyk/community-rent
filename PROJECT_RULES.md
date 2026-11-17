@@ -12,7 +12,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.11 · 2026-11-17 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
+> **版本**：v1.12 · 2026-11-17 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
 
 ---
 
@@ -282,7 +282,7 @@ web-admin/
 
 与后端四层（Controller/Service/Mapper/Entity）是**同构的**：页面层↔Controller、组件层↔VO、数据层↔Service/Mapper、基础层↔common。论文里可直接对比着写。
 
-### 4.6 前端硬性规则（F1–F14）
+### 4.6 前端硬性规则（F1–F15）
 
 | 编号 | 规则 | 违反后果 |
 | :-- | :-- | :-- |
@@ -300,6 +300,7 @@ web-admin/
 | **F12** | 样式用 `scss` + CSS 变量（`variables.scss`），禁止用内联 `style` 堆业务样式（动态计算除外） | 主题无法统一，改色改一天 |
 | **F13** | 要「假数据」只能放 `src/mock/*.js` 并在提交说明里标注**哪几个接口还是 mock**；不许把假数据写进 views 假装功能已完成 | 答辩演示时数据全是假的 |
 | **F14** | 前端同样受 §13 AI 准则约束：先说方案再写文件、一次只改点名文件、不新增依赖、不写 TODO 当完成 | — |
+| **F15** | **凭据只允许「混淆存本地」，且必须可一键清除**：记住密码等本地保存的密码只能经 `utils/remember.js` 做 base64 混淆后进 `localStorage`，注释里必须写明「非加密」；密码/令牌**禁止进日志、URL query、`sessionStorage` 之外的第三方上报**，取消勾选或改密后必须清除 | 明文密码出现在 DevTools/日志/截图里；换浏览器或共用电脑时密码泄漏 |
 
 ### 4.7 页面清单（= 开发排期依据）
 
@@ -308,6 +309,7 @@ web-admin/
 | 页面 | 路由 | 对应需求 | 优先级 |
 | :-- | :-- | :-- | :-- |
 | 登录 / 注册 | `/login` `/register` | FR-M1-01 | P0 |
+| 忘记密码（知识校验式重置） | `/forgot` | FR-M1-01 | P0 |
 | 首页（含推荐位） | `/home` | FR-M5-01~04 | P1 |
 | 物品列表 / 搜索 | `/items` | FR-M1-03 | P0 |
 | 物品详情（占用日历+试算） | `/items/:id` | FR-M1-04、FR-M2-01 | P0 |
@@ -856,5 +858,6 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-11 | 项目负责人 | **v1.7（文件上传落地）**：①§4.1 `module/system/` 注释扩为「系统支撑：配置参数 + 文件存储」，`FileController`/`UploadVO` 归此包（不新建 `module/file`，避免目录树膨胀）；②§9 配置清单追加 `file.*` 四项，并新增「唯一的例外：基础设施配置」——走 yml 不进策略表的判定标准是**「这个值变了，租用/计费/信誉/损耗的行为会不会变」**；③配套实绩：`FileStorageProperties` + `FileStorageUtil`（UUID 重命名防路径穿越）+ `WebMvcConfig`（`/uploads/**` 静态映射）+ `POST /api/files/upload`，`GlobalExceptionHandler` 补 `MaxUploadSizeExceededException`→2005，`SecurityConfig` 放行 `/uploads/**`（`<img>` 带不了 Authorization 头）；`FileStorageUtilTest` 7 例，测试总数 28 → **35/35** |
 | 2026-11-16 | 项目负责人 | **v1.8（社区字典化）**：①§6 新增 6.5——社区统一存 `community_id`，禁止再出现社区字符串；`user.community_id` 可空、`item.community_id` 必填；就近一律整数等值分档「同小区 > 同片区 > 其他」，不做距离/地图；排序开关 `community.priority.enabled` 为 0 时必须退回原排序（论文消融入口，不许删分支）；②§9 配置清单增 `community.priority.enabled`（默认 1），信誉档门限改为「免押 ≥95、正常 60–94」；③§15 `docs/数据库设计.md` 更新为 19 表；④配套实绩：`community` 表 + `uk_community_city_district_name`、`user`/`item` 改列、`GET /api/communities`（匿名可读）、`CommunityServiceTest` 1 例，`03-verify.sql` 19 断言全 PASS、14 条负向全被拦，测试总数 35 → **37/37**；⑤口径变更已备案：需求总结 §14.1 两条（免押门槛 80→95、社区字段字典化） |
 | 2026-11-17 | 项目负责人 | **v1.9（注册登录与双令牌落地）**：①§7.2 新增「双令牌规则」表——access 2h 只带 `sub/username/role/typ`、refresh 7d 只带 `sub/jti/typ`（**故意不带角色**，刷新时重查库）；`typ` 互斥校验（拿 access 调刷新 = 1003）；Redis 白名单 `auth:refresh:{userId}` 支撑登出与轮换；初始信誉分读 `credit_policy.init_score` 禁字面量；密码错与用户不存在合并 1005；`status != NORMAL` 登录与刷新都 1006；②§7.2 新增「唯一索引冲突按约束名分流」表——`uk_user_phone`→2001、`uk_occupancy`→4090、未识别→4090 + `unmapped duplicate key` 日志，禁止无条件转 4090；③§9 配置清单增 `jwt.secret`/`jwt.expire-minutes`(120)/`jwt.refresh-expire-days`(7)；④配套实绩：`AuthServiceImpl`/`UserServiceImpl`/`RefreshTokenStore`/`UserConvert` + 4 DTO + 2 VO + 2 Controller，`AuthIntegrationTest` 8 例，测试总数 37 → **45/45**；G3 实测注册→登录→me→refresh→logout→旧 refresh 1003→真 token 上传全链路通过 |
-| 2026-11-17 | 项目负责人 | **v1.11（ElMessage 样式缺陷）**：§4.6 F5 补充——`ElMessage`/`ElMessageBox`/`ElNotification` 是函数式 API，不进模板，`unplugin-vue-components` 的样式注入对它们无效；显式 `import { ElMessage } from 'element-plus'` 只拿到 JS 函数，须在 `src/main.js` 手工 `import 'element-plus/theme-chalk/el-message.css'`（+`el-message-box.css`）。症状极具迷惑性：**接口确实返回 2001，界面上却什么都没有**（消息 div 被渲染在文档流末尾、视口之外）。配套实绩：`web-user`/`web-admin` 的 `main.js` 各加两行样式引入，重跑 `npm run build` 后 `dist` 的 CSS 中 `.el-message{` 由 0 命中变为命中 |
 | 2026-11-17 | 项目负责人 | **v1.10（前端骨架落地 + 联调纠契约）**：①§2 前端依赖表按 `npm registry` 实测值补全，并**更正 `unplugin-auto-import` 为 `^0.19.0`**（0.x 线最后一版，原写的 `^0.27.0` 在 npm 上不存在、装不上）；新增 `@vitejs/plugin-vue 5.2.x`、`vue-router 4.x` 两行；②新增 §7.4「序列化与格式契约」——`LocalDateTime`/`LocalDate` 必须走 `JacksonConfig`（**`spring.jackson.date-format` 对 JSR-310 无效**，只配 yml 会输出 ISO `T` 格式）、Long 主键字符串、金额只展示、**库默认值列 insert 后必须重查**否则返回 null；③§8.1 `DuplicateKeyException` 由「一律 4090」改为按约束名分流，与 §7.2 对齐；④§15 索引新增 `docs/接口文档.md`（契约真源）与 `docs/前后端并行开发方案.md`（7 个垂直切片）；⑤配套实绩：`web-user`（5173）与 `web-admin`（5174）两个 Vite 应用、`request.js` 单例（4090 不弹全局提示）、`constants.js` 枚举单一来源、登录/注册/我的/概览页；前端 `npm run build` 两端成功（1730 / 1726 模块）；联调经 5173 代理发现并修 2 个契约缺陷（ISO 时间、注册 `createdAt` 为 null），新增 `JacksonConfigTest` 2 例，测试总数 45 → **47/47** |
+| 2026-11-17 | 项目负责人 | **v1.11（ElMessage 样式缺陷）**：§4.6 F5 补充——`ElMessage`/`ElMessageBox`/`ElNotification` 是函数式 API，不进模板，`unplugin-vue-components` 的样式注入对它们无效；显式 `import { ElMessage } from 'element-plus'` 只拿到 JS 函数，须在 `src/main.js` 手工 `import 'element-plus/theme-chalk/el-message.css'`（+`el-message-box.css`）。症状极具迷惑性：**接口确实返回 2001，界面上却什么都没有**（消息 div 被渲染在文档流末尾、视口之外）。配套实绩：`web-user`/`web-admin` 的 `main.js` 各加两行样式引入，重跑 `npm run build` 后 `dist` 的 CSS 中 `.el-message{` 由 0 命中变为命中 |
+| 2026-11-17 | 项目负责人 | **v1.12（记住密码与忘记密码落地）**：①§4.6 新增 **F15**——凭据只允许经 `utils/remember.js` 做 base64 混淆后进 `localStorage`，注释须写明「非加密」，密码/令牌禁止进日志与 URL，取消勾选或改密后必须清除；②§4.7 页面清单补「忘记密码 `/forgot`」（P0，与登录同档，用户进不去时要能从登录页一步到达）；③`POST /api/auth/reset-password` 的设计边界写进 `docs/接口文档.md` §1.9：**三种要素不匹配统一一句 2001 文案**（否则接口沦为账号探测器）、重置成功即作废该用户全部 refresh 令牌、以「知识校验」替代短信验证码（无通道，需求总结 §10）；④配套实绩：`ResetPasswordDTO` + `AuthServiceImpl.resetPassword`（`@Transactional`，只更新 `password_hash`，随后 `refreshTokenStore.remove`）+ `AuthController` 新端点 + `SecurityConfig` 放行；`AuthIntegrationTest` 3 例（改密后旧密码 1005 / 新密码可登录 / 旧 refresh 1003；三要素不匹配文案一致；未设社区账号跳过社区校验），测试总数 47 → **50/50**；前端新增 `utils/remember.js`、`views/auth/ForgotView.vue`、`LoginView` 的记住密码与忘记密码入口，`npm run build` 通过（含 `ForgotView` 独立分块）；⑤顺带修两处**测试自身缺陷**：`MapperIntegrationTest` 不再锁死 `user`/`user_role` 总行数（浏览器注册会合法地让条数增长，改为校验 4 个种子手机号存在 + 分页用下界断言）、`JwtUtilTest`/`JwtAuthenticationFilterTest` 的篡改用例改打**签名段首字符**（32 字节 HMAC 的 base64url 末字符含 2 个无关位，改末字符可能解码出相同签名 → 偶发假失败），并给过滤器测试补 `@BeforeEach` 清 `SecurityContextHolder`（Spring 测试残留登录态会污染它）；⑥口径变更已备案：需求总结 §14.1「找回密码：原不做 → 知识校验式重置」 |

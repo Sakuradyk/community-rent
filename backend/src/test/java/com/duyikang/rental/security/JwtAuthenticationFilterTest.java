@@ -2,6 +2,7 @@ package com.duyikang.rental.security;
 
 import com.duyikang.rental.common.constant.ErrorCode;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -24,6 +25,13 @@ class JwtAuthenticationFilterTest {
 
     private final JwtUtil jwtUtil = new JwtUtil(SECRET, 120, 7);
     private final JwtAuthenticationFilter filter = new JwtAuthenticationFilter(jwtUtil);
+
+    // 同一 JVM 里 Spring 测试（AuthIntegrationTest）会把登录态放进线程本地的
+    // SecurityContextHolder，若不清洗，"伪造 token 不建立登录态"这类断言会偶发失败。
+    @BeforeEach
+    void clearBefore() {
+        SecurityContextHolder.clearContext();
+    }
 
     @AfterEach
     void clearContext() {
@@ -70,6 +78,13 @@ class JwtAuthenticationFilterTest {
         assertEquals(ErrorCode.TOKEN_INVALID, request.getAttribute(JwtAuthenticationFilter.AUTH_ERROR_ATTRIBUTE));
     }
 
+    /** 改签名段首字符：32 字节 HMAC 的 base64url 末字符含 2 个无关位，改末字符可能"改了等于没改"。 */
+    private static String tamperSignature(String token) {
+        String[] parts = token.split("\\.");
+        char first = parts[2].charAt(0);
+        char replaced = first == 'A' ? 'B' : 'A';
+        return parts[0] + "." + parts[1] + "." + replaced + parts[2].substring(1);
+    }
     @Test
     @DisplayName("doFilter_无Authorization头_不写失败原因由入口点默认1001")
     void doFilter_noHeader_leavesAttributeEmpty() throws Exception {

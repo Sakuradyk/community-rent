@@ -38,13 +38,20 @@ class JwtUtilTest {
     @DisplayName("resolve_篡改签名_返回null而不抛异常")
     void resolve_tamperedToken_returnsNull() {
         String token = jwtUtil.generateAccess(1001L, "duyikang", "USER");
-        // 改动签名段最后一个字符
-        String tampered = token.substring(0, token.length() - 1)
-                + (token.endsWith("A") ? "B" : "A");
+        // 必须改签名段的"首"字符：32 字节 HMAC 的 base64url 末字符含 2 个无关位，
+        // 改末字符可能解码出完全相同的签名字节，篡改就白改了（曾因此偶发失败）。
+        String tampered = tamperSignature(token);
 
         assertNull(jwtUtil.resolve(tampered));
     }
 
+    /** 改签名段首字符：32 字节 HMAC 的 base64url 末字符含 2 个无关位，改末字符可能"改了等于没改"。 */
+    private static String tamperSignature(String token) {
+        String[] parts = token.split("\\.");
+        char first = parts[2].charAt(0);
+        char replaced = first == 'A' ? 'B' : 'A';
+        return parts[0] + "." + parts[1] + "." + replaced + parts[2].substring(1);
+    }
     @Test
     @DisplayName("resolve_乱码字符串_返回null")
     void resolve_garbage_returnsNull() {

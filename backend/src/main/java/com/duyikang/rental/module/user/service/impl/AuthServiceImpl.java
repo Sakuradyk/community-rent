@@ -10,6 +10,7 @@ import com.duyikang.rental.module.user.convert.UserConvert;
 import com.duyikang.rental.module.user.dto.LoginDTO;
 import com.duyikang.rental.module.user.dto.RefreshDTO;
 import com.duyikang.rental.module.user.dto.RegisterDTO;
+import com.duyikang.rental.module.user.dto.ResetPasswordDTO;
 import com.duyikang.rental.module.user.entity.Role;
 import com.duyikang.rental.module.user.entity.User;
 import com.duyikang.rental.module.user.entity.UserRole;
@@ -148,6 +149,39 @@ public class AuthServiceImpl implements AuthService {
         Long userId = currentUserId();
         refreshTokenStore.remove(userId);
         log.info("用户登出 userId={}", userId);
+    }
+
+    /**
+     * 忘记密码：知识校验（手机号 + 昵称 + 已设置过的社区）→ 重设密码 → 作废全部会话。
+     *
+     * <p>两个刻意的设计：</p>
+     * <ol>
+     *   <li><b>三种不匹配返回同一句话</b>：否则这个接口就成了"手机号是否存在 + 昵称是什么"的查询器；</li>
+     *   <li><b>改密后删除 refresh 白名单</b>：密码被改意味着原主人可能已失去控制权，
+     *       旧令牌必须一起失效，否则攻击者手里那张 refresh 仍能续命。</li>
+     * </ol>
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void resetPassword(ResetPasswordDTO dto) {
+        User user = userMapper.selectOne(
+                Wrappers.<User>lambdaQuery().eq(User::getPhone, dto.phone()));
+        boolean matched = user != null
+                && dto.nickname().equals(user.getNickname())
+                && (user.getCommunityId() == null || user.getCommunityId().equals(dto.communityId()));
+        if (!matched) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "手机号、昵称或社区与注册信息不一致");
+        }
+        if (!STATUS_NORMAL.equals(user.getStatus())) {
+            throw new BizException(ErrorCode.ACCOUNT_DISABLED);
+        }
+
+        User patch = new User();
+        patch.setId(user.getId());
+        patch.setPasswordHash(passwordEncoder.encode(dto.newPassword()));
+        userMapper.updateById(patch);
+        refreshTokenStore.remove(user.getId());
+        log.info("用户重置密码 userId={}（已作废其全部 refresh 令牌）", user.getId());
     }
 
     /**

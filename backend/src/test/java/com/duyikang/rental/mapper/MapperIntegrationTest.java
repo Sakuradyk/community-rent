@@ -83,9 +83,14 @@ class MapperIntegrationTest {
     @Test
     @DisplayName("selectCount_19张表_与种子数据行数一致")
     void selectCount_allTables_equalsSeedData() {
-        assertThat(userMapper.selectCount(null)).isEqualTo(4L);
+        // user / user_role 会随浏览器注册与联调不断增长，锁死总行数会让一条无关的注册失败，
+        // 因此改为"4 个种子手机号都在"——映射正确性同样得到验证，且不受真实使用影响。
+        assertThat(userMapper.selectCount(new QueryWrapper<User>().in("phone",
+                List.of("13800000000", "13800000001", "13800000002", "13800000003"))))
+                .isEqualTo(4L);
         assertThat(roleMapper.selectCount(null)).isEqualTo(2L);
-        assertThat(userRoleMapper.selectCount(null)).isEqualTo(5L);
+        // 同理：每注册一个账号就多一行 USER 角色绑定，这里只要求"种子 5 行还在"
+        assertThat(userRoleMapper.selectCount(null)).isGreaterThanOrEqualTo(5L);
         assertThat(communityMapper.selectCount(null)).isEqualTo(6L);
         assertThat(categoryMapper.selectCount(null)).isEqualTo(11L);
         assertThat(itemMapper.selectCount(null)).isEqualTo(7L);
@@ -201,8 +206,9 @@ class MapperIntegrationTest {
     void selectPage_pluginRegistered_totalAndPages() {
         IPage<User> page = userMapper.selectPage(new Page<>(1, 2), null);
 
-        assertThat(page.getTotal()).isEqualTo(4L);
-        assertThat(page.getPages()).isEqualTo(2L);
+        // 只验证"分页参数被插件真正执行"：总数随注册增长，故用下界断言
+        assertThat(page.getTotal()).isGreaterThanOrEqualTo(4L);
+        assertThat(page.getPages()).isGreaterThanOrEqualTo(2L);
         assertThat(page.getRecords()).hasSize(2);
     }
 

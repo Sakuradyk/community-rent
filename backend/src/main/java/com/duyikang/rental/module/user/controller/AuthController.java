@@ -4,6 +4,7 @@ import com.duyikang.rental.common.result.Result;
 import com.duyikang.rental.module.user.dto.LoginDTO;
 import com.duyikang.rental.module.user.dto.RefreshDTO;
 import com.duyikang.rental.module.user.dto.RegisterDTO;
+import com.duyikang.rental.module.user.dto.ResetPasswordDTO;
 import com.duyikang.rental.module.user.service.AuthService;
 import com.duyikang.rental.module.user.vo.LoginVO;
 import jakarta.validation.Valid;
@@ -14,12 +15,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 认证接口（注册 / 登录 / 刷新 / 登出）。
+ * 认证接口（注册 / 登录 / 刷新 / 登出 / 忘记密码）。
  *
  * <p>Controller 只做三件事：接参、交给 Service、包成 {@link Result}；
  * 业务规则一律在 Service 里，不写 if 判断业务（PROJECT_RULES.md §4.3）。</p>
  *
- * <p>登录、注册、刷新在 {@code SecurityConfig} 里放行；登出需要带 access 令牌。</p>
+ * <p>登录、注册、刷新、忘记密码在 {@code SecurityConfig} 里放行；登出需要带 access 令牌。</p>
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -50,6 +51,13 @@ public class AuthController {
     @PostMapping("/logout")
     public Result<Void> logout() {
         authService.logout();
+        return Result.ok();
+    }
+
+    /** 忘记密码：手机号 + 昵称（+ 注册时选的社区）校验通过后重设密码，并作废该账号全部会话。 */
+    @PostMapping("/reset-password")
+    public Result<Void> resetPassword(@Valid @RequestBody ResetPasswordDTO dto) {
+        authService.resetPassword(dto);
         return Result.ok();
     }
 }
