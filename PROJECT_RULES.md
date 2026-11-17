@@ -12,7 +12,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.12 · 2026-11-17 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
+> **版本**：v1.13 · 2026-11-17 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
 
 ---
 
@@ -401,6 +401,28 @@ spring:
 > **用 Druid 的理由（论文/答辩口径）**：项目负责人指定；相较内置 HikariCP，Druid 自带 **SQL 监控、慢 SQL 统计、连接池实时状态** 与 Web 关联统计，可在答辩时直接打开 `/druid` 页面演示「并发下单时的连接占用与慢 SQL」，作为 K2 并发压测的辅助证据。
 
 ---
+
+### 4.9 前端视觉基线（暖橙主题，2026-11-17 与负责人确认）
+
+**风格定档**：温暖亲切、生活化社区感；主色暖橙、辅色木色；细节密度**宽松舒适**（主容器 12px 圆角、留白偏大、列表一屏 3–4 张卡）。登录/注册/找回密码三页共用 `web-user/src/layout/AuthLayout.vue`（左品牌区 + 右表单卡，窄屏 ≤900px 上下堆叠）。
+
+**唯一取值来源**
+
+| 类别 | 文件 | 说明 |
+| :-- | :-- | :-- |
+| 颜色/字号/间距/圆角/阴影 | `web-user/src/assets/styles/variables.scss`、`web-admin/src/assets/styles/variables.scss` | 页面**禁止写死**色值与像素，只能 `@use ... as *` 后取变量 |
+| Element Plus 主题 | 两端 `global.scss` 的 `:root` 覆盖 | 覆盖 `--el-color-primary` 时必须同时覆盖 `-light-3/5/7/8/9` 与 `-dark-2`，否则 hover/disabled 态退回默认蓝 |
+| 六状态颜色 | `web-user/src/utils/constants.js` 的 `color` 字段 | 与两端 `$color-*` 状态色逐字一致；页面用 `statusOf(dict, value).color`，**禁止** `<el-tag type="success">` 这类魔法值 |
+| 页面版式样板 | `web-user/src/layout/AuthLayout.vue`、`web-user/src/layout/DefaultLayout.vue` | 新页面照抄结构与间距节奏，末期只换皮不动骨架 |
+
+**硬规则**
+
+1. **主色用法分层**：`$color-primary`(#ea580c) 只做交互填充（按钮、选中块，白字对比 3.6:1）；`$color-accent`(#f97316) 只做图形（图标、进度条、装饰），**不得承载小字**；白底文字用 `$color-primary-deep`(#c2410c，对比 5.2:1)。
+2. **字号只有五档**（12/14/16/20/28），**间距只有七档**（4/8/12/16/24/32/48）。需要"稍微大一点"就换档，不许出现 `13px`、`18px`。
+3. **状态色只从字典取**（同 F2）。新增状态必须同时改后端枚举、`constants.js`、两端 `variables.scss`、`docs/接口文档.md`。
+4. **函数式组件样式**按 F5 在 `main.js` 显式引入；改主题后必须 `npm run build` 并 grep `dist/assets/*.css` 确认变量已进包（自查法：`--el-color-primary` 是否命中）。
+5. **不做**：暗色模式、插画素材库、动效库、自定义图标字体（§2.1 禁新依赖，装饰一律用纯 CSS 渐变/光斑）。
+6. **时间盒**：视觉打磨只在切片收尾时做（≤1 天/次），**不得**挤占 K2/K3 等硬指标模块的开发时间。
 
 ## 5. 命名规范
 
@@ -861,3 +883,4 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-17 | 项目负责人 | **v1.10（前端骨架落地 + 联调纠契约）**：①§2 前端依赖表按 `npm registry` 实测值补全，并**更正 `unplugin-auto-import` 为 `^0.19.0`**（0.x 线最后一版，原写的 `^0.27.0` 在 npm 上不存在、装不上）；新增 `@vitejs/plugin-vue 5.2.x`、`vue-router 4.x` 两行；②新增 §7.4「序列化与格式契约」——`LocalDateTime`/`LocalDate` 必须走 `JacksonConfig`（**`spring.jackson.date-format` 对 JSR-310 无效**，只配 yml 会输出 ISO `T` 格式）、Long 主键字符串、金额只展示、**库默认值列 insert 后必须重查**否则返回 null；③§8.1 `DuplicateKeyException` 由「一律 4090」改为按约束名分流，与 §7.2 对齐；④§15 索引新增 `docs/接口文档.md`（契约真源）与 `docs/前后端并行开发方案.md`（7 个垂直切片）；⑤配套实绩：`web-user`（5173）与 `web-admin`（5174）两个 Vite 应用、`request.js` 单例（4090 不弹全局提示）、`constants.js` 枚举单一来源、登录/注册/我的/概览页；前端 `npm run build` 两端成功（1730 / 1726 模块）；联调经 5173 代理发现并修 2 个契约缺陷（ISO 时间、注册 `createdAt` 为 null），新增 `JacksonConfigTest` 2 例，测试总数 45 → **47/47** |
 | 2026-11-17 | 项目负责人 | **v1.11（ElMessage 样式缺陷）**：§4.6 F5 补充——`ElMessage`/`ElMessageBox`/`ElNotification` 是函数式 API，不进模板，`unplugin-vue-components` 的样式注入对它们无效；显式 `import { ElMessage } from 'element-plus'` 只拿到 JS 函数，须在 `src/main.js` 手工 `import 'element-plus/theme-chalk/el-message.css'`（+`el-message-box.css`）。症状极具迷惑性：**接口确实返回 2001，界面上却什么都没有**（消息 div 被渲染在文档流末尾、视口之外）。配套实绩：`web-user`/`web-admin` 的 `main.js` 各加两行样式引入，重跑 `npm run build` 后 `dist` 的 CSS 中 `.el-message{` 由 0 命中变为命中 |
 | 2026-11-17 | 项目负责人 | **v1.12（记住密码与忘记密码落地）**：①§4.6 新增 **F15**——凭据只允许经 `utils/remember.js` 做 base64 混淆后进 `localStorage`，注释须写明「非加密」，密码/令牌禁止进日志与 URL，取消勾选或改密后必须清除；②§4.7 页面清单补「忘记密码 `/forgot`」（P0，与登录同档，用户进不去时要能从登录页一步到达）；③`POST /api/auth/reset-password` 的设计边界写进 `docs/接口文档.md` §1.9：**三种要素不匹配统一一句 2001 文案**（否则接口沦为账号探测器）、重置成功即作废该用户全部 refresh 令牌、以「知识校验」替代短信验证码（无通道，需求总结 §10）；④配套实绩：`ResetPasswordDTO` + `AuthServiceImpl.resetPassword`（`@Transactional`，只更新 `password_hash`，随后 `refreshTokenStore.remove`）+ `AuthController` 新端点 + `SecurityConfig` 放行；`AuthIntegrationTest` 3 例（改密后旧密码 1005 / 新密码可登录 / 旧 refresh 1003；三要素不匹配文案一致；未设社区账号跳过社区校验），测试总数 47 → **50/50**；前端新增 `utils/remember.js`、`views/auth/ForgotView.vue`、`LoginView` 的记住密码与忘记密码入口，`npm run build` 通过（含 `ForgotView` 独立分块）；⑤顺带修两处**测试自身缺陷**：`MapperIntegrationTest` 不再锁死 `user`/`user_role` 总行数（浏览器注册会合法地让条数增长，改为校验 4 个种子手机号存在 + 分页用下界断言）、`JwtUtilTest`/`JwtAuthenticationFilterTest` 的篡改用例改打**签名段首字符**（32 字节 HMAC 的 base64url 末字符含 2 个无关位，改末字符可能解码出相同签名 → 偶发假失败），并给过滤器测试补 `@BeforeEach` 清 `SecurityContextHolder`（Spring 测试残留登录态会污染它）；⑥口径变更已备案：需求总结 §14.1「找回密码：原不做 → 知识校验式重置」 |
+| 2026-11-17 | 项目负责人 | **v1.13（前端视觉基线定档）**：①新增 §4.9——风格定档「温暖亲切 / 主色暖橙 / 宽松舒适 12px 圆角」，并规定**唯一取值来源**（两端 `variables.scss` 的色/字/距/圆角、`global.scss` 的 `:root` EP 覆盖、`constants.js` 的六状态 `color`、`AuthLayout`/`DefaultLayout` 作为版式样板）；②硬规则六条——主色分三层（`#ea580c` 交互填充 3.6:1 / `#f97316` 仅图形不承载小字 / `#c2410c` 白底文字 5.2:1）、字号只五档间距只七档、状态色只从字典取、主题改动必须 build 后 grep `--el-color-primary` 自查、不做暗色/插画/动效库/自定义图标、视觉打磨每次 ≤1 天且不得挤占 K2/K3；③配套实绩：`web-user` 重写 `variables.scss`（暖橙 21 个颜色 token + 五档字号 + 七档间距 + 三档圆角 + 三档暖色阴影）与 `global.scss`（`:root` 覆盖 EP 含 `-light-3/5/7/8/9`/`-dark-2`），新增 `layout/AuthLayout.vue`（左右分栏 + 纯 CSS 光斑 + 三条硬指标展示，≤900px 上下堆叠），`LoginView`/`RegisterView`/`ForgotView` 统一套用，`DefaultLayout` 重做顶栏（logo 方块 + 导航下划线 + 吸顶毛玻璃），`constants.js` 三张状态字典加 `color` 字段；`web-admin` 新增 `variables.scss`（管理端更紧凑一套）与同族 `global.scss`；两端 `npm run build` 通过（用户端含 `AuthLayout`/各视图独立分块） |

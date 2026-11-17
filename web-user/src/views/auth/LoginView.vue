@@ -1,39 +1,38 @@
 <template>
-  <div class="auth-page">
-    <div class="auth-card">
-      <h2 class="title">登录邻里租</h2>
-      <p class="muted subtitle">用手机号和密码登录</p>
+  <AuthLayout>
+    <h2 class="title">登录</h2>
+    <p class="muted subtitle">用手机号和密码进入邻里租</p>
 
-      <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent>
-        <el-form-item label="手机号" prop="phone">
-          <el-input v-model="form.phone" maxlength="11" placeholder="请输入 11 位手机号" clearable />
-        </el-form-item>
-        <el-form-item label="密码" prop="password">
-          <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" @keyup.enter="handleSubmit" />
-        </el-form-item>
+    <el-form ref="formRef" :model="form" :rules="rules" label-position="top" size="large" @submit.prevent>
+      <el-form-item label="手机号" prop="phone">
+        <el-input v-model="form.phone" maxlength="11" placeholder="请输入 11 位手机号" clearable />
+      </el-form-item>
+      <el-form-item label="密码" prop="password">
+        <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" @keyup.enter="handleSubmit" />
+      </el-form-item>
 
-        <div class="options">
-          <el-checkbox v-model="remember">记住密码</el-checkbox>
-          <router-link class="forgot" :to="{ name: 'forgot' }">忘记密码？</router-link>
-        </div>
-
-        <el-button type="primary" class="submit" :loading="loading" @click="handleSubmit">
-          登录
-        </el-button>
-      </el-form>
-
-      <div class="foot muted">
-        还没有账号？
-        <router-link :to="{ name: 'register' }">立即注册</router-link>
+      <div class="options">
+        <el-checkbox v-model="remember">记住密码</el-checkbox>
+        <router-link class="forgot" :to="{ name: 'forgot' }">忘记密码？</router-link>
       </div>
+
+      <el-button type="primary" class="submit" :loading="loading" @click="handleSubmit">
+        登录
+      </el-button>
+    </el-form>
+
+    <div class="foot muted">
+      还没有账号？
+      <router-link :to="{ name: 'register' }">立即注册</router-link>
     </div>
-  </div>
+  </AuthLayout>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import AuthLayout from '@/layout/AuthLayout.vue'
 import { useUserStore } from '@/stores/user'
 import { PHONE_PATTERN, LIMITS } from '@/utils/constants'
 import { saveRemember, loadRemember, clearRemember } from '@/utils/remember'
@@ -89,15 +88,37 @@ async function handleSubmit() {
 </script>
 
 <style scoped lang="scss">
-.title { margin: 0 0 4px; font-size: 22px; }
-.subtitle { margin: 0 0 24px; }
+@use '@/assets/styles/variables.scss' as *;
+
+.title {
+  margin: 0 0 $space-1;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+}
+
+.subtitle {
+  margin: 0 0 $space-6;
+}
+
 .options {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: -4px 0 12px;
+  margin: -$space-1 0 $space-3;
 }
-.forgot { font-size: 13px; color: var(--el-color-primary); text-decoration: none; }
-.submit { width: 100%; margin-top: 8px; }
-.foot { margin-top: 20px; text-align: center; }
+
+.forgot {
+  font-size: $font-size-xs;
+}
+
+.submit {
+  width: 100%;
+  margin-top: $space-2;
+}
+
+.foot {
+  margin-top: $space-6;
+  text-align: center;
+  font-size: $font-size-sm;
+}
 </style>

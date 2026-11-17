@@ -1,8 +1,78 @@
-// 全局设计变量：改颜色只改这里，不要在组件里写死色值
-$color-primary: #2f7d5d;
-$color-primary-light: #e8f4ef;
-$color-text: #1f2329;
-$color-text-secondary: #646a73;
-$color-border: #dcdfe6;
-$radius-base: 8px;
+// ============================================================================
+// 全局设计变量（web-user）——改颜色/圆角/间距只改这里，组件里禁止写死色值与像素
+// 风格基线（2026-11-17 与负责人确认）：温暖亲切的社区感 + 暖橙主色 + 宽松留白
+// ============================================================================
+
+// ---------- 主色：暖橙 ----------
+// 说明：F97316 饱和度高、亲和力强，但它与白字的对比度只有 2.8:1，
+// 拿来做按钮底色会在投影仪上"糊成一片"。因此拆三层使用：
+//   $color-primary      交互填充色（按钮、选中块），白字对比度 3.6:1
+//   $color-accent       品牌强调色（图标、进度条、装饰块），仅做图形不承载文字
+//   $color-primary-deep 白底上的文字色（链接、选中导航），对比度 5.2:1
+$color-primary: #ea580c;
+$color-primary-hover: #f97316;
+$color-primary-deep: #c2410c;
+$color-accent: #f97316;
+$color-primary-tint: #fff1e6; // 浅底：选中行、标签背景
+$color-primary-wash: #fffaf5; // 极浅底：卡片 hover、斑马纹
+
+// ---------- 木色与暖中性色（背景、文字、边框都带一点暖，避免冷灰与橙打架） ----------
+$color-bg: #fbf7f2; // 页面底色：暖白
+$color-surface: #ffffff; // 卡片、表单底色
+$color-surface-sunken: #f6efe7; // 下沉区块（品牌区、表头）
+$color-wood: #b45309; // 木色点缀：分隔线、图标
+$color-text: #33261d; // 主文字：暖黑
+$color-text-secondary: #7a6a5d; // 次要文字
+$color-text-placeholder: #a89a8c; // 占位符
+$color-border: #efe4d8; // 常规边框
+$color-border-strong: #e2d3c3; // 强调边框（输入框 hover）
+
+// ---------- 状态色：六状态一一对应，与 utils/constants.js 的字典同步 ----------
+// 规则：颜色只从字典取，页面里禁止再写 <el-tag type="success"> 这种魔法值
+$color-pending: #b45309; // 待确认
+$color-confirmed: #1d4ed8; // 已确认
+$color-in-use: #15803d; // 使用中
+$color-overdue: #b91c1c; // 逾期
+$color-completed: #57534e; // 已完成
+$color-cancelled: #a8a29e; // 已取消
+$color-success: #15803d;
+$color-warning: #b45309;
+$color-danger: #b91c1c;
+$color-info: #57534e;
+
+// ---------- 字号：五档，页面不得自创 ----------
+$font-size-xs: 12px; // 辅助说明、表格脚注
+$font-size-sm: 14px; // 正文默认
+$font-size-md: 16px; // 小标题、强调正文
+$font-size-lg: 20px; // 区块标题
+$font-size-xl: 28px; // 页面主标题
+$font-weight-regular: 400;
+$font-weight-medium: 500;
+$font-weight-bold: 700;
+$line-height-tight: 1.25;
+$line-height-base: 1.6;
+
+// ---------- 间距标尺：只允许取这七个值 ----------
+$space-1: 4px;
+$space-2: 8px;
+$space-3: 12px;
+$space-4: 16px;
+$space-6: 24px;
+$space-8: 32px;
+$space-12: 48px;
+
+// ---------- 圆角（宽松舒适档：主容器 12px） ----------
+$radius-sm: 6px;
+$radius-base: 12px;
+$radius-lg: 16px;
+$radius-pill: 999px;
+
+// ---------- 阴影：暖色阴影比纯黑阴影更"软"，不会在米色底上发灰 ----------
+$shadow-sm: 0 2px 8px rgba(120, 82, 45, 0.06);
+$shadow-base: 0 6px 24px rgba(120, 82, 45, 0.10);
+$shadow-lg: 0 16px 48px rgba(120, 82, 45, 0.14);
+
+// ---------- 布局 ----------
 $page-max-width: 1120px;
+$header-height: 64px;
+$auth-split-min-width: 900px; // 低于此宽度登录页改为上下堆叠

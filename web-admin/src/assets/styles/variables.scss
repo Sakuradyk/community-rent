@@ -1,0 +1,58 @@
+// ============================================================================
+// 全局设计变量（web-admin）
+// 与 web-user 同族（暖橙主色），但管理端以"信息密度"优先：
+// 圆角更小、留白更紧、字号更小，和用户端的宽松留白区分开。
+// 两端颜色 token 必须保持同一套值，否则同一状态标签两边不同色。
+// ============================================================================
+
+$color-primary: #ea580c;
+$color-primary-hover: #f97316;
+$color-primary-deep: #c2410c;
+$color-primary-tint: #fff1e6;
+
+$color-bg: #f7f5f2;
+$color-surface: #ffffff;
+$color-surface-sunken: #f4efe9;
+$color-text: #33261d;
+$color-text-secondary: #7a6a5d;
+$color-text-placeholder: #a89a8c;
+$color-border: #eae0d5;
+
+// 六状态色：与 web-user/src/utils/constants.js 的 color 字段逐字一致
+$color-pending: #b45309;
+$color-confirmed: #1d4ed8;
+$color-in-use: #15803d;
+$color-overdue: #b91c1c;
+$color-completed: #57534e;
+$color-cancelled: #a8a29e;
+$color-success: #15803d;
+$color-warning: #b45309;
+$color-danger: #b91c1c;
+$color-info: #57534e;
+
+// 管理端侧边栏（深木色，与暖橙主色同族）
+$color-sidebar-bg: #2b1d12;
+$color-sidebar-text: #d9c9b8;
+$color-sidebar-active: #f97316;
+
+$font-size-xs: 12px;
+$font-size-sm: 13px;
+$font-size-md: 15px;
+$font-size-lg: 18px;
+$font-size-xl: 24px;
+
+$space-1: 4px;
+$space-2: 8px;
+$space-3: 12px;
+$space-4: 16px;
+$space-6: 24px;
+$space-8: 32px;
+
+$radius-sm: 4px;
+$radius-base: 8px;
+$radius-lg: 12px;
+
+$shadow-sm: 0 1px 3px rgba(120, 82, 45, 0.08);
+
+$sidebar-width: 200px;
+$header-height: 56px;

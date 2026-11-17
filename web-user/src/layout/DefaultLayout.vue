@@ -2,19 +2,26 @@
   <div class="layout">
     <header class="layout-header">
       <div class="layout-header-inner">
-        <router-link to="/" class="brand">邻里租</router-link>
+        <router-link to="/" class="brand">
+          <span class="brand-mark" aria-hidden="true">邻</span>
+          <span class="brand-text">邻里租</span>
+        </router-link>
+
         <nav class="nav">
           <router-link to="/" class="nav-item">首页</router-link>
           <router-link to="/mine" class="nav-item">我的</router-link>
         </nav>
+
         <div class="account">
           <template v-if="userStore.isLogin">
-            <span class="nickname">{{ userStore.profile?.nickname || '已登录' }}</span>
-            <el-button link type="primary" @click="handleLogout">退出</el-button>
+            <router-link :to="{ name: 'mine' }" class="account-name">
+              {{ userStore.profile?.nickname || '已登录' }}
+            </router-link>
+            <el-button link @click="handleLogout">退出</el-button>
           </template>
           <template v-else>
-            <el-button link type="primary" @click="router.push({ name: 'login' })">登录</el-button>
-            <el-button type="primary" size="small" @click="router.push({ name: 'register' })">注册</el-button>
+            <el-button link @click="router.push({ name: 'login' })">登录</el-button>
+            <el-button type="primary" @click="router.push({ name: 'register' })">注册</el-button>
           </template>
         </div>
       </div>
@@ -24,8 +31,10 @@
       <router-view />
     </main>
 
-    <footer class="layout-footer muted">
-      社区物品租用平台 · 本科毕业设计演示环境
+    <footer class="layout-footer">
+      <div class="footer-inner muted">
+        社区物品租用平台 · 本科毕业设计演示环境 · 模拟支付，不涉及真实资金
+      </div>
     </footer>
   </div>
 </template>
@@ -67,7 +76,8 @@ async function handleLogout() {
 }
 
 .layout-header {
-  background: #fff;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
   border-bottom: 1px solid $color-border;
   position: sticky;
   top: 0;
@@ -77,50 +87,99 @@ async function handleLogout() {
 .layout-header-inner {
   max-width: $page-max-width;
   margin: 0 auto;
-  height: 60px;
+  height: $header-height;
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 0 16px;
+  gap: $space-8;
+  padding: 0 $space-4;
 }
 
 .brand {
-  font-size: 18px;
-  font-weight: 700;
-  color: $color-primary;
+  display: inline-flex;
+  align-items: center;
+  gap: $space-2;
+  color: $color-text;
+}
+
+.brand-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: $radius-sm;
+  background: $color-primary;
+  color: #fff;
+  font-weight: $font-weight-bold;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(234, 88, 12, 0.24);
+}
+
+.brand-text {
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  letter-spacing: 0.5px;
 }
 
 .nav {
   display: flex;
-  gap: 16px;
+  gap: $space-6;
   flex: 1;
 }
 
+// 导航：默认次要色，选中态用主色 + 底部下划线（比只变色更容易看清当前位置）
 .nav-item {
+  position: relative;
+  height: $header-height;
+  display: inline-flex;
+  align-items: center;
   color: $color-text-secondary;
-  font-size: 14px;
-}
+  font-size: $font-size-sm;
 
-.nav-item.router-link-exact-active {
-  color: $color-primary;
-  font-weight: 600;
+  &::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: transparent;
+    border-radius: 2px 2px 0 0;
+  }
+
+  &.router-link-exact-active {
+    color: $color-primary-deep;
+    font-weight: $font-weight-medium;
+
+    &::after { background: $color-primary; }
+  }
 }
 
 .account {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: $space-3;
 }
 
-.nickname {
-  font-size: 14px;
+.account-name {
+  font-size: $font-size-sm;
   color: $color-text;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .layout-main { flex: 1; }
 
 .layout-footer {
+  border-top: 1px solid $color-border;
+  background: $color-surface;
+}
+
+.footer-inner {
+  max-width: $page-max-width;
+  margin: 0 auto;
+  padding: $space-6 $space-4;
   text-align: center;
-  padding: 24px 16px;
 }
 </style>

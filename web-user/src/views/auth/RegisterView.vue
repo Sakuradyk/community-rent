@@ -1,8 +1,7 @@
 <template>
-  <div class="auth-page">
-    <div class="auth-card">
-      <h2 class="title">注册邻里租</h2>
-      <p class="muted subtitle">注册后即可发布闲置物品、预约邻居的物品</p>
+  <AuthLayout>
+    <h2 class="title">注册邻里租</h2>
+    <p class="muted subtitle">注册后即可发布闲置物品、预约邻居的物品</p>
 
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent>
         <el-form-item label="手机号" prop="phone">
@@ -35,14 +34,14 @@
         已有账号？
         <router-link :to="{ name: 'login' }">去登录</router-link>
       </div>
-    </div>
-  </div>
+  </AuthLayout>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import AuthLayout from '@/layout/AuthLayout.vue'
 import { useUserStore } from '@/stores/user'
 import { listCommunities } from '@/api/community'
 import { PHONE_PATTERN, LIMITS } from '@/utils/constants'
@@ -117,8 +116,24 @@ async function handleSubmit() {
 </script>
 
 <style scoped lang="scss">
-.title { margin: 0 0 4px; font-size: 22px; }
-.subtitle { margin: 0 0 24px; }
-.submit { width: 100%; margin-top: 8px; }
-.foot { margin-top: 20px; text-align: center; }
+@use '@/assets/styles/variables.scss' as *;
+
+.title {
+  margin: 0 0 $space-1;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+}
+
+.subtitle { margin: 0 0 $space-6; }
+
+.submit {
+  width: 100%;
+  margin-top: $space-2;
+}
+
+.foot {
+  margin-top: $space-6;
+  text-align: center;
+  font-size: $font-size-sm;
+}
 </style>

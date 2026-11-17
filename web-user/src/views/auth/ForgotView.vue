@@ -1,17 +1,16 @@
 <template>
-  <div class="auth-page">
-    <div class="auth-card">
-      <h2 class="title">找回密码</h2>
-      <p class="muted subtitle">核对注册信息后即可设置新密码</p>
+  <AuthLayout>
+    <h2 class="title">找回密码</h2>
+    <p class="muted subtitle">核对注册信息后即可设置新密码</p>
 
-      <el-alert
-        class="tip"
-        type="info"
-        :closable="false"
-        show-icon
-        title="没有短信验证码，改用「你记得什么」来证明身份"
-        description="请填写注册时的手机号与昵称；如果注册时选过所在小区，还要选对同一个小区。三项对不上会统一提示「信息不一致」，这是防止本页被用来试探别人的账号。"
-      />
+    <el-alert
+      class="tip"
+      type="info"
+      :closable="false"
+      show-icon
+      title="没有短信验证码，改用「你记得什么」来证明身份"
+      description="请填写注册时的手机号与昵称；如果注册时选过所在小区，还要选对同一个小区。三项对不上会统一提示「信息不一致」，这是防止本页被用来试探别人的账号。"
+    />
 
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent>
         <el-form-item label="手机号" prop="phone">
@@ -46,14 +45,14 @@
         想起来了？
         <router-link :to="{ name: 'login' }">返回登录</router-link>
       </div>
-    </div>
-  </div>
+  </AuthLayout>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import AuthLayout from '@/layout/AuthLayout.vue'
 import { resetPassword } from '@/api/auth'
 import { listCommunities } from '@/api/community'
 import { PHONE_PATTERN, LIMITS } from '@/utils/constants'
@@ -126,9 +125,25 @@ async function handleSubmit() {
 </script>
 
 <style scoped lang="scss">
-.title { margin: 0 0 4px; font-size: 22px; }
-.subtitle { margin: 0 0 16px; }
-.tip { margin-bottom: 18px; }
-.submit { width: 100%; margin-top: 8px; }
-.foot { margin-top: 20px; text-align: center; }
+@use '@/assets/styles/variables.scss' as *;
+
+.title {
+  margin: 0 0 $space-1;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+}
+
+.subtitle { margin: 0 0 $space-4; }
+.tip { margin-bottom: $space-4; }
+
+.submit {
+  width: 100%;
+  margin-top: $space-2;
+}
+
+.foot {
+  margin-top: $space-6;
+  text-align: center;
+  font-size: $font-size-sm;
+}
 </style>

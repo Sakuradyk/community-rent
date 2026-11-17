@@ -68,7 +68,7 @@ class JwtAuthenticationFilterTest {
     @DisplayName("doFilter_伪造token_记录TOKEN_INVALID")
     void doFilter_tamperedToken_recordsTokenInvalid() throws Exception {
         String token = jwtUtil.generateAccess(1001L, "duyikang", "USER");
-        String tampered = token.substring(0, token.length() - 1) + (token.endsWith("A") ? "B" : "A");
+        String tampered = tamperSignature(token);
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/items");
         request.addHeader("Authorization", "Bearer " + tampered);
 

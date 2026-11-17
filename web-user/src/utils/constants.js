@@ -35,30 +35,34 @@ export const AUTH_ERROR_CODES = [
   CODE.TOKEN_EXPIRED
 ]
 
-/** 订单六状态（母版口径，禁止增删） */
+/** 订单六状态（母版口径，禁止增删）
+ *  color 是唯一颜色来源：与 assets/styles/variables.scss 的 $color-* 状态色一致。
+ *  页面一律 `<el-tag :color="statusOf(ORDER_STATUS, row.status).color" effect="plain">`，
+ *  禁止再写 <el-tag type="success"> 这类魔法值，否则同一状态在两个页面会是两种颜色。
+ */
 export const ORDER_STATUS = {
-  PENDING: { label: '待确认', tag: 'warning' },
-  CONFIRMED: { label: '已确认', tag: 'primary' },
-  IN_USE: { label: '使用中', tag: 'primary' },
-  OVERDUE: { label: '已逾期', tag: 'danger' },
-  COMPLETED: { label: '已完成', tag: 'success' },
-  CANCELLED: { label: '已取消', tag: 'info' }
+  PENDING: { label: '待确认', tag: 'warning', color: '#b45309' },
+  CONFIRMED: { label: '已确认', tag: 'primary', color: '#1d4ed8' },
+  IN_USE: { label: '使用中', tag: 'primary', color: '#15803d' },
+  OVERDUE: { label: '已逾期', tag: 'danger', color: '#b91c1c' },
+  COMPLETED: { label: '已完成', tag: 'success', color: '#57534e' },
+  CANCELLED: { label: '已取消', tag: 'info', color: '#a8a29e' }
 }
 
 /** 物品状态 */
 export const ITEM_STATUS = {
-  PENDING: { label: '待审核', tag: 'warning' },
-  ON_SHELF: { label: '已上架', tag: 'success' },
-  OFF_SHELF: { label: '已下架', tag: 'info' },
-  RENTED: { label: '出租中', tag: 'primary' },
-  MAINTAINING: { label: '维修中', tag: 'warning' },
-  REJECTED: { label: '已驳回', tag: 'danger' }
+  PENDING: { label: '待审核', tag: 'warning', color: '#b45309' },
+  ON_SHELF: { label: '已上架', tag: 'success', color: '#15803d' },
+  OFF_SHELF: { label: '已下架', tag: 'info', color: '#57534e' },
+  RENTED: { label: '出租中', tag: 'primary', color: '#1d4ed8' },
+  MAINTAINING: { label: '维修中', tag: 'warning', color: '#b45309' },
+  REJECTED: { label: '已驳回', tag: 'danger', color: '#b91c1c' }
 }
 
 /** 账号状态 */
 export const USER_STATUS = {
-  NORMAL: { label: '正常', tag: 'success' },
-  DISABLED: { label: '已禁用', tag: 'danger' }
+  NORMAL: { label: '正常', tag: 'success', color: '#15803d' },
+  DISABLED: { label: '已禁用', tag: 'danger', color: '#b91c1c' }
 }
 
 /** 角色码 */
@@ -89,5 +93,5 @@ export const PHONE_PATTERN = /^1[3-9]\d{9}$/
 
 /** 状态取展示信息，未知值兜底，避免页面因后端新增状态白屏 */
 export function statusOf(dict, value) {
-  return dict[value] || { label: value || '未知', tag: 'info' }
+  return dict[value] || { label: value || '未知', tag: 'info', color: '#57534e' }
 }
