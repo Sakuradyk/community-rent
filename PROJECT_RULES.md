@@ -12,7 +12,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.8 · 2026-11-16 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
+> **版本**：v1.9 · 2026-11-17 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
 
 ---
 
@@ -495,6 +495,31 @@ Result<T> { int code; String message; T data; String traceId; }
 - 过滤器**禁止**自己写响应体（会导致 `/api/ping` 与业务接口两套 JSON 格式），只负责「建登录态」或「把失败码放进 attribute」。
 - 对应的回归测试：`JwtAuthenticationFilterTest` 四例（合法/过期/篡改/无头）；改动鉴权链路必须同步跑它。
 
+**双令牌规则（已实现：`security/JwtUtil` + `security/RefreshTokenStore`，改鉴权必须遵守）**
+
+| 项 | access | refresh |
+| :-- | :-- | :-- |
+| 有效期 | 2 小时（`jwt.expire-minutes: 120`） | 7 天（`jwt.refresh-expire-days: 7`） |
+| claims | `sub`/`username`/`role`/`typ=access` | `sub`/`jti`/`typ=refresh`（**不带角色**） |
+| 用途 | 所有业务接口的 `Authorization: Bearer` | 只用于 `POST /api/auth/refresh` |
+
+- **类型必须互斥**：拿 access 调刷新接口 → `1003`；拿 refresh 调业务接口 → 过滤器只认 access，同样 `1003`。少了这道校验，2 小时有效期形同虚设。
+- **refresh 不带角色是故意的**：刷新时重新查库取最新角色，否则管理员被降权后还能用旧 refresh 换出高权限 access。
+- **服务端白名单**：Redis `auth:refresh:{userId}` → 当前 `jti`，TTL 7 天。刷新即覆盖（旧 refresh 立刻失效），登出删 key。JWT 自包含，没有这份白名单就收不回令牌。
+- 注册即发令牌；`user` 与 `user_role(USER)` 必须**同事务**；初始信誉分读 `credit_policy.init_score`，**禁止写 80 字面量**。
+- 密码错与用户不存在返回**同一个** `1005`（区分即等于提供手机号枚举接口）；`status != NORMAL` → 登录与刷新都 `1006`。
+- 回归测试：`AuthIntegrationTest` 8 例（注册/重号/分流/1005 合并/1006/轮换/类型互斥/登出）。
+
+**唯一索引冲突必须按约束名分流**（`GlobalExceptionHandler.handleDuplicateKey`）：
+
+| 约束名 | 返回 | 理由 |
+| :-- | :-- | :-- |
+| `uk_user_phone` | `2001`「手机号已注册」 | 用户动作是「换个手机号」 |
+| `uk_occupancy` | `4090`「该时段已被占用」 | K2 兜底，压测断言依赖 |
+| 未识别 | `4090` + `unmapped duplicate key` 日志 | 新表唯一键冲突不许冒成 500，同时留线索补分流 |
+
+禁止「一律转 4090」：注册时重复手机号会被前端按日期冲突提示，用户照着改日期也解决不了。
+
 ### 7.3 分页与参数
 
 - 分页入参固定 `pageNum`（从 1 起）、`pageSize`（默认 10，**上限 100**，超出截断不报错）。
@@ -635,6 +660,7 @@ public Long createOrder(OrderCreateDTO dto) {
 | 订单 | `order.lock.ttl`（秒） | 10 |
 | 社区 | `community.priority.enabled`（列表/推荐「同小区 > 同片区」优先档开关，0 = 关闭，供消融对比） | 1 |
 | 基础设施 | `file.root` / `.access-path` / `.max-size-mb` / `.allowed-ext` | `uploads` / `/uploads` / 5 / `jpg,jpeg,png,webp` |
+| 基础设施 | `jwt.secret` / `jwt.expire-minutes` / `jwt.refresh-expire-days` | 见 `application-dev.yml` / 120 / 7 |
 
 **实现方式**（本项目**没有** `spring-cloud` 依赖，`@RefreshScope` 用不了，别写）：
 
@@ -813,3 +839,4 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-11 | 项目负责人 | **v1.6（实体层落地）**：①§4.1 目录树 `module/` 下新增 `system/`（`sys_config` 键值参数归属，原先 18 张表里这张无处安放）；②§12 新增两条测试前提——**Mockito 必须用 `mock-maker-subclass`**（本机 JDK `17+35` 无可用 agent 自挂载，inline mock maker 会让每个 `@SpringBootTest` 报 `Could not initialize inline Byte Buddy mock maker`）、集成测试连真实库 + `@Transactional` 回滚且禁用 H2；③配套实绩：18 实体 + 18 Mapper + `MybatisPlusConfig`（分页插件显式注册）+ `MapperIntegrationTest` 8 例，测试总数 20 → **28/28** |
 | 2026-11-11 | 项目负责人 | **v1.7（文件上传落地）**：①§4.1 `module/system/` 注释扩为「系统支撑：配置参数 + 文件存储」，`FileController`/`UploadVO` 归此包（不新建 `module/file`，避免目录树膨胀）；②§9 配置清单追加 `file.*` 四项，并新增「唯一的例外：基础设施配置」——走 yml 不进策略表的判定标准是**「这个值变了，租用/计费/信誉/损耗的行为会不会变」**；③配套实绩：`FileStorageProperties` + `FileStorageUtil`（UUID 重命名防路径穿越）+ `WebMvcConfig`（`/uploads/**` 静态映射）+ `POST /api/files/upload`，`GlobalExceptionHandler` 补 `MaxUploadSizeExceededException`→2005，`SecurityConfig` 放行 `/uploads/**`（`<img>` 带不了 Authorization 头）；`FileStorageUtilTest` 7 例，测试总数 28 → **35/35** |
 | 2026-11-16 | 项目负责人 | **v1.8（社区字典化）**：①§6 新增 6.5——社区统一存 `community_id`，禁止再出现社区字符串；`user.community_id` 可空、`item.community_id` 必填；就近一律整数等值分档「同小区 > 同片区 > 其他」，不做距离/地图；排序开关 `community.priority.enabled` 为 0 时必须退回原排序（论文消融入口，不许删分支）；②§9 配置清单增 `community.priority.enabled`（默认 1），信誉档门限改为「免押 ≥95、正常 60–94」；③§15 `docs/数据库设计.md` 更新为 19 表；④配套实绩：`community` 表 + `uk_community_city_district_name`、`user`/`item` 改列、`GET /api/communities`（匿名可读）、`CommunityServiceTest` 1 例，`03-verify.sql` 19 断言全 PASS、14 条负向全被拦，测试总数 35 → **37/37**；⑤口径变更已备案：需求总结 §14.1 两条（免押门槛 80→95、社区字段字典化） |
+| 2026-11-17 | 项目负责人 | **v1.9（注册登录与双令牌落地）**：①§7.2 新增「双令牌规则」表——access 2h 只带 `sub/username/role/typ`、refresh 7d 只带 `sub/jti/typ`（**故意不带角色**，刷新时重查库）；`typ` 互斥校验（拿 access 调刷新 = 1003）；Redis 白名单 `auth:refresh:{userId}` 支撑登出与轮换；初始信誉分读 `credit_policy.init_score` 禁字面量；密码错与用户不存在合并 1005；`status != NORMAL` 登录与刷新都 1006；②§7.2 新增「唯一索引冲突按约束名分流」表——`uk_user_phone`→2001、`uk_occupancy`→4090、未识别→4090 + `unmapped duplicate key` 日志，禁止无条件转 4090；③§9 配置清单增 `jwt.secret`/`jwt.expire-minutes`(120)/`jwt.refresh-expire-days`(7)；④配套实绩：`AuthServiceImpl`/`UserServiceImpl`/`RefreshTokenStore`/`UserConvert` + 4 DTO + 2 VO + 2 Controller，`AuthIntegrationTest` 8 例，测试总数 37 → **45/45**；G3 实测注册→登录→me→refresh→logout→旧 refresh 1003→真 token 上传全链路通过 |

@@ -86,16 +86,33 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 唯一索引冲突。
+     * 唯一索引冲突，<b>按约束名分流</b>。
      *
-     * <p>K2 场景：并发下单时两条请求同时通过应用层预检与 Redis 锁，最后由
-     * {@code uk_occupancy(item_id, occupy_date)} 兜底，此处转 4090。
-     * 其它表（如用户名重复）按业务含义处理，默认仍返回 4090，
-     * 调用方若需区分应在 Service 内先做存在性校验。</p>
+     * <p>为什么不一律返回 4090：4090 的文案是「该时段已被占用，请选择其他日期」，
+     * 若用户注册时重复手机号也被回成这句，前端会错误地弹出日期选择器——
+     * 错误码不仅要"对"，还要"能指导用户下一步动作"（PROJECT_RULES.md §7.2）。</p>
+     *
+     * <ul>
+     *   <li>{@code uk_user_phone} → 2001「手机号已注册」；</li>
+     *   <li>{@code uk_occupancy} 及未识别的约束 → 4090（K2 兜底仍走这条，
+     *       避免新表的唯一键冲突冒成 500）。</li>
+     * </ul>
+     *
+     * <p>未识别的约束会额外打一条 {@code unmapped duplicate key} 日志，
+     * 便于后续按真实约束名补齐分流规则。</p>
      */
     @ExceptionHandler(DuplicateKeyException.class)
     public Result<Void> handleDuplicateKey(DuplicateKeyException e) {
-        log.warn("唯一索引冲突：{}", e.getMostSpecificCause().getMessage());
+        String detail = e.getMostSpecificCause().getMessage();
+        if (detail != null && detail.contains("uk_user_phone")) {
+            log.warn("唯一索引冲突（手机号重复）：{}", detail);
+            return Result.fail(ErrorCode.PARAM_ERROR, "手机号已注册");
+        }
+        if (detail != null && detail.contains("uk_occupancy")) {
+            log.warn("唯一索引冲突（时段被占）：{}", detail);
+            return Result.fail(ErrorCode.OCCUPANCY_CONFLICT, "该时段已被占用，请选择其他日期");
+        }
+        log.warn("unmapped duplicate key：{}", detail);
         return Result.fail(ErrorCode.OCCUPANCY_CONFLICT, "该时段已被占用，请选择其他日期");
     }
 

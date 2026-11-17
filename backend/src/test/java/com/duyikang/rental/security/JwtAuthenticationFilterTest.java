@@ -22,7 +22,7 @@ class JwtAuthenticationFilterTest {
 
     private static final String SECRET = "rental-platform-jwt-secret-key-2026-please-change-before-production";
 
-    private final JwtUtil jwtUtil = new JwtUtil(SECRET, 720);
+    private final JwtUtil jwtUtil = new JwtUtil(SECRET, 120, 7);
     private final JwtAuthenticationFilter filter = new JwtAuthenticationFilter(jwtUtil);
 
     @AfterEach
@@ -33,7 +33,7 @@ class JwtAuthenticationFilterTest {
     @Test
     @DisplayName("doFilter_合法token_建立登录态且不写失败原因")
     void doFilter_validToken_setsAuthenticationWithoutError() throws Exception {
-        String token = jwtUtil.generate(1001L, "duyikang", "USER");
+        String token = jwtUtil.generateAccess(1001L, "duyikang", "USER");
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/items");
         request.addHeader("Authorization", "Bearer " + token);
 
@@ -46,7 +46,7 @@ class JwtAuthenticationFilterTest {
     @Test
     @DisplayName("doFilter_过期token_记录TOKEN_EXPIRED且不建立登录态")
     void doFilter_expiredToken_recordsTokenExpired() throws Exception {
-        String token = new JwtUtil(SECRET, -1L).generate(1001L, "duyikang", "USER");
+        String token = new JwtUtil(SECRET, -1L, 7).generateAccess(1001L, "duyikang", "USER");
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/items");
         request.addHeader("Authorization", "Bearer " + token);
 
@@ -59,7 +59,7 @@ class JwtAuthenticationFilterTest {
     @Test
     @DisplayName("doFilter_伪造token_记录TOKEN_INVALID")
     void doFilter_tamperedToken_recordsTokenInvalid() throws Exception {
-        String token = jwtUtil.generate(1001L, "duyikang", "USER");
+        String token = jwtUtil.generateAccess(1001L, "duyikang", "USER");
         String tampered = token.substring(0, token.length() - 1) + (token.endsWith("A") ? "B" : "A");
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/items");
         request.addHeader("Authorization", "Bearer " + tampered);

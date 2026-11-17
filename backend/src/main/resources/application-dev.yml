@@ -54,9 +54,12 @@ spring:
           max-wait: 2000ms
 
 # JWT：HS256 要求密钥 >= 32 字节
+# access 120 分钟（短：泄露窗口小，前端靠 refresh 静默续期）
+# refresh 7 天（长：避免频繁登录；服务端白名单 auth:refresh:{userId} 可随时吊销）
 jwt:
   secret: rental-platform-jwt-secret-key-2026-please-change-before-production
-  expire-minutes: 720
+  expire-minutes: 120
+  refresh-expire-days: 7
 
 # 文件存储（基础设施配置，不进策略表；PROJECT_RULES.md §9）
 # max-size-mb 必须与 spring.servlet.multipart.max-file-size 保持一致
