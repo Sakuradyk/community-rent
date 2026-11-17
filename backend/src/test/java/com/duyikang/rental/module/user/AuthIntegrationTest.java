@@ -105,6 +105,8 @@ class AuthIntegrationTest {
         assertNotEquals(PASSWORD, saved.getPasswordHash());
         // 返回的手机号已脱敏
         assertEquals("139****1001", vo.user().phone());
+        // 契约回归：注册返回的 UserVO 必须带 createdAt（insert 后要重新读库，否则为 null）
+        assertNotNull(vo.user().createdAt(), "注册响应必须返回 createdAt（docs/接口文档.md §1.6）");
 
         List<UserRole> links = userRoleMapper.selectList(
                 Wrappers.<UserRole>lambdaQuery().eq(UserRole::getUserId, saved.getId()));

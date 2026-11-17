@@ -94,7 +94,10 @@ public class AuthServiceImpl implements AuthService {
         userRoleMapper.insert(link);
 
         log.info("用户注册成功 userId={} nickname={}", user.getId(), user.getNickname());
-        return issueTokens(user, ROLE_USER);
+        // created_at / update_time 由数据库默认值生成，insert 后实体里没有值。
+        // 契约要求 LoginVO.user 带 createdAt（docs/接口文档.md §1.6），所以重新读一次再返回。
+        User saved = userMapper.selectById(user.getId());
+        return issueTokens(saved != null ? saved : user, ROLE_USER);
     }
 
     @Override

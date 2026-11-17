@@ -12,7 +12,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.9 · 2026-11-17 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
+> **版本**：v1.10 · 2026-11-17 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
 
 ---
 
@@ -64,15 +64,18 @@
 | 令牌 | jjwt | **0.12.x** | 0.9 的 `Jwts.parser().setSigningKey()` |
 | 连接池 | **Druid** | **1.2.23**，坐标 `com.alibaba:druid-spring-boot-3-starter` | `druid-spring-boot-starter`（Boot 2 专用，Boot 3 启动即报 `AutoConfiguration.imports` 缺失） |
 | 构建 | Maven | **3.9.9** | Gradle（本项目不用） |
-| 前端框架 | Vue | **3.4+** | Vue 2 的 `data(){return{}}` + `this.xxx` |
-| 前端构建 | Vite | **5.x** | vue-cli / webpack |
-| UI 库 | Element Plus | **2.5+** | Element UI（Vue 2 专用） |
-| 状态管理 | Pinia | **2.x** | Vuex |
-| 请求库 | Axios | 1.x | fetch 直调（除特殊场景） |
+| 前端框架 | Vue | **3.5.x**（实测已装 3.5.45） | Vue 2 的 `data(){return{}}` + `this.xxx` |
+| 前端构建 | Vite | **5.x**（5 线最后一版 5.4.21，`npm view vite@5 version` 核对） | vue-cli / webpack |
+| Vue 插件 | @vitejs/plugin-vue | **5.2.x** | `@vitejs/plugin-vue2` |
+| UI 库 | Element Plus | **2.5+**（实测 2.14.8） | Element UI（Vue 2 专用） |
+| 状态管理 | Pinia | **2.x**（实测 2.3.1） | Vuex |
+| 路由 | vue-router | **4.x**（实测 4.6.5） | vue-router 3 |
+| 请求库 | Axios | 1.x（实测 1.21.1） | fetch 直调（除特殊场景） |
 | 图表 | ECharts | 5.x | — |
 | 日期库 | dayjs | `^1.11.0`（§4.6 F8 点名） | 用 `new Date()` 手算日期、引入 moment（体积约 4 倍） |
 | 样式预处理 | sass | `^1.77.0`，**包名 `sass`**（§4.6 F12 点名） | `node-sass`（已停止维护，Node 24 编译不过） |
-| 组件按需引入 | unplugin-auto-import / unplugin-vue-components | `^0.27.0`（§4.6 F5 点名） | 全局 `app.use(ElementPlus)`、`unplugin-element-plus`（旧方案，只处理样式不处理 API） |
+| 组件按需引入 | unplugin-vue-components | `^0.27.0`（§4.6 F5 点名） | 全局 `app.use(ElementPlus)`、`unplugin-element-plus`（旧方案，只处理样式不处理 API） |
+| 自动导入 | unplugin-auto-import | **`^0.19.0`**（该包 0.x 线最后一版，**不存在 0.27.x**；1.x 起改 API，未验证不升） | 写 `^0.27.0`（装不上，`No matching version found`） |
 | 运行时 | Node.js | **v24.10.0**（本机） | — |
 
 ### 2.1 依赖引入规则
@@ -527,6 +530,18 @@ Result<T> { int code; String message; T data; String traceId; }
 - 禁止把 `HttpServletRequest` 传进 Service。
 - 当前登录用户从 `SecurityContextHolder` 或自定义 `@CurrentUser` 注解取，**禁止**从请求参数里信任 `userId`（防越权）。
 
+### 7.4 序列化与格式契约（与 `docs/接口文档.md` §0 一一对应）
+
+| 对象 | 规则 | 落地位置 / 禁止 |
+| :-- | :-- | :-- |
+| `LocalDateTime` | 输出**必须** `yyyy-MM-dd HH:mm:ss`，入参同格式 | `common/config/JacksonConfig`（`Jackson2ObjectMapperBuilderCustomizer` + `SimpleModule`）。**`spring.jackson.date-format` 只作用于 `java.util.Date`，对 JSR-310 无效**，只配 yml 会输出 ISO `2026-11-16T20:36:43` |
+| `LocalDate` | 输出/入参**必须** `yyyy-MM-dd` | 同上（同一个 `SimpleModule`） |
+| `Long` 主键 | 一律 JSON **字符串** | 实体/VO 字段加 `@JsonSerialize(using = ToStringSerializer.class)`；前端禁 `Number(id)`（F9） |
+| 金额 | `BigDecimal` → JSON number，前端只展示 `toFixed(2)`，**不在前端算钱**（F1） | 规则 §6.1 |
+| 需要回给前端的库默认值列（如 `created_at`） | `insert` 后**必须** `selectById` 重查再返回 | MyBatis-Plus 不会回填库默认值，直接返回实体会是 `null`（注册响应 `user.createdAt` 即此坑） |
+
+**验证要求**：改序列化行为必须补测试，断言里写 `doesNotContain("T")` 之类的负向条件（参考 `JacksonConfigTest`），只断言"有值"不算验证。
+
 ---
 
 ## 8. 异常与事务规范
@@ -536,7 +551,7 @@ Result<T> { int code; String message; T data; String traceId; }
 - 业务异常统一抛 `BizException(ErrorCode)`（已实现：`common/exception/BizException`，构造参数为 `ErrorCode` 枚举），**禁止** `throw new RuntimeException("xxx")`。
 - 全局 `@RestControllerAdvice` 统一转换，**禁止**在 Controller 里 `try-catch` 包一层返回 `Result.error`。
 - **禁止**向客户端暴露堆栈、SQL、类名。
-- **必须**捕获并转换的特定异常：`DuplicateKeyException` → `4090 TIME_CONFLICT`（占用日唯一索引兜底路径）。
+- **必须**捕获并转换的特定异常：`DuplicateKeyException` **按约束名分流**（见 §7.2 同表）—— `uk_occupancy` → `4090`；`uk_user_phone` → `2001`「手机号已注册」；其余未识别的唯一键 → `4090` 且日志 `log.warn("unmapped duplicate key：{}", detail)`。**禁止**把所有唯一键冲突一律转 4090（重复手机号会弹出"该时段已被占用"）。
 
 ### 8.2 事务
 
@@ -813,7 +828,8 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | `docs/AI协作开发手册.md` | **方法论**：七步闭环、四类提示词模板、边界用例清单、上下文管理、答辩防守。**不含本文件的规则副本**——同一规则只在本文件维护，两处冲突时以本文件为准 |
 | `项目进度.md` | **做到哪了**：三条硬指标现状、已完成项与验证证据、未完成项依赖顺序、环境速查、已知坑（每次可提交单元完成后更新） |
 | `docs/数据库设计.md` | 表结构、索引、字段理由、K 点约束落地对照、实测记录（已完成，19 表） |
-| `docs/接口文档.md` | REST 契约、错误码（待产出） |
+| `docs/接口文档.md` | **契约唯一真源（人读）**：全局约定（分页/id/时间/金额）、错误码表、4090 形状、已冻结接口逐字段、未冻结接口清单、变更记录（改契约必须同步本文件并在提交说明打 `CONTRACT CHANGE:`） |
+| `docs/前后端并行开发方案.md` | **怎么并行**：7 个垂直切片（0 骨架 → 1 账号 → 2 物品 → 3 下单 K2 → 4 流转 → 5 结算/信誉 → 6 推荐/看板）、契约三真源、mock 纪律、每切片 DoD |
 | `docs/测试用例.md` | 边界用例清单（边开发边填） |
 | `docs/notes/*.md` | 各 K 点技术笔记（论文素材） |
 
@@ -840,3 +856,4 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-11 | 项目负责人 | **v1.7（文件上传落地）**：①§4.1 `module/system/` 注释扩为「系统支撑：配置参数 + 文件存储」，`FileController`/`UploadVO` 归此包（不新建 `module/file`，避免目录树膨胀）；②§9 配置清单追加 `file.*` 四项，并新增「唯一的例外：基础设施配置」——走 yml 不进策略表的判定标准是**「这个值变了，租用/计费/信誉/损耗的行为会不会变」**；③配套实绩：`FileStorageProperties` + `FileStorageUtil`（UUID 重命名防路径穿越）+ `WebMvcConfig`（`/uploads/**` 静态映射）+ `POST /api/files/upload`，`GlobalExceptionHandler` 补 `MaxUploadSizeExceededException`→2005，`SecurityConfig` 放行 `/uploads/**`（`<img>` 带不了 Authorization 头）；`FileStorageUtilTest` 7 例，测试总数 28 → **35/35** |
 | 2026-11-16 | 项目负责人 | **v1.8（社区字典化）**：①§6 新增 6.5——社区统一存 `community_id`，禁止再出现社区字符串；`user.community_id` 可空、`item.community_id` 必填；就近一律整数等值分档「同小区 > 同片区 > 其他」，不做距离/地图；排序开关 `community.priority.enabled` 为 0 时必须退回原排序（论文消融入口，不许删分支）；②§9 配置清单增 `community.priority.enabled`（默认 1），信誉档门限改为「免押 ≥95、正常 60–94」；③§15 `docs/数据库设计.md` 更新为 19 表；④配套实绩：`community` 表 + `uk_community_city_district_name`、`user`/`item` 改列、`GET /api/communities`（匿名可读）、`CommunityServiceTest` 1 例，`03-verify.sql` 19 断言全 PASS、14 条负向全被拦，测试总数 35 → **37/37**；⑤口径变更已备案：需求总结 §14.1 两条（免押门槛 80→95、社区字段字典化） |
 | 2026-11-17 | 项目负责人 | **v1.9（注册登录与双令牌落地）**：①§7.2 新增「双令牌规则」表——access 2h 只带 `sub/username/role/typ`、refresh 7d 只带 `sub/jti/typ`（**故意不带角色**，刷新时重查库）；`typ` 互斥校验（拿 access 调刷新 = 1003）；Redis 白名单 `auth:refresh:{userId}` 支撑登出与轮换；初始信誉分读 `credit_policy.init_score` 禁字面量；密码错与用户不存在合并 1005；`status != NORMAL` 登录与刷新都 1006；②§7.2 新增「唯一索引冲突按约束名分流」表——`uk_user_phone`→2001、`uk_occupancy`→4090、未识别→4090 + `unmapped duplicate key` 日志，禁止无条件转 4090；③§9 配置清单增 `jwt.secret`/`jwt.expire-minutes`(120)/`jwt.refresh-expire-days`(7)；④配套实绩：`AuthServiceImpl`/`UserServiceImpl`/`RefreshTokenStore`/`UserConvert` + 4 DTO + 2 VO + 2 Controller，`AuthIntegrationTest` 8 例，测试总数 37 → **45/45**；G3 实测注册→登录→me→refresh→logout→旧 refresh 1003→真 token 上传全链路通过 |
+| 2026-11-17 | 项目负责人 | **v1.10（前端骨架落地 + 联调纠契约）**：①§2 前端依赖表按 `npm registry` 实测值补全，并**更正 `unplugin-auto-import` 为 `^0.19.0`**（0.x 线最后一版，原写的 `^0.27.0` 在 npm 上不存在、装不上）；新增 `@vitejs/plugin-vue 5.2.x`、`vue-router 4.x` 两行；②新增 §7.4「序列化与格式契约」——`LocalDateTime`/`LocalDate` 必须走 `JacksonConfig`（**`spring.jackson.date-format` 对 JSR-310 无效**，只配 yml 会输出 ISO `T` 格式）、Long 主键字符串、金额只展示、**库默认值列 insert 后必须重查**否则返回 null；③§8.1 `DuplicateKeyException` 由「一律 4090」改为按约束名分流，与 §7.2 对齐；④§15 索引新增 `docs/接口文档.md`（契约真源）与 `docs/前后端并行开发方案.md`（7 个垂直切片）；⑤配套实绩：`web-user`（5173）与 `web-admin`（5174）两个 Vite 应用、`request.js` 单例（4090 不弹全局提示）、`constants.js` 枚举单一来源、登录/注册/我的/概览页；前端 `npm run build` 两端成功（1730 / 1726 模块）；联调经 5173 代理发现并修 2 个契约缺陷（ISO 时间、注册 `createdAt` 为 null），新增 `JacksonConfigTest` 2 例，测试总数 45 → **47/47** |

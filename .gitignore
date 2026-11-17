@@ -27,6 +27,11 @@ pnpm-debug.log*
 npm-debug.log*
 yarn-error.log*
 
+# ---------- 前端依赖缓存（本机沙箱只能把 store/cache 放进工作区） ----------
+.cache/
+.pnpm-store/
+.pnpm-state/
+
 # ---------- 运行时 ----------
 logs/
 *.log
