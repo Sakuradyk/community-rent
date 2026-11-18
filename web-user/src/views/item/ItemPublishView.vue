@@ -23,10 +23,11 @@ const loading = ref(false)
 const uploading = ref(false)
 const categories = ref([])
 const communities = ref([])
-const parentCategoryId = ref(null)
 
 const form = reactive({
   title: '',
+  // 一级类目只用于筛选二级下拉，不提交给后端；但它是"二级必选"的前置，所以必须进 form 才能被 el-form 校验
+  parentCategoryId: null,
   categoryId: null,
   communityId: null,
   description: '',
@@ -37,7 +38,7 @@ const form = reactive({
 })
 
 const childCategories = computed(() => {
-  const group = categories.value.find((g) => String(g.id) === String(parentCategoryId.value))
+  const group = categories.value.find((g) => String(g.id) === String(form.parentCategoryId))
   return group ? group.children : []
 })
 
@@ -47,7 +48,7 @@ const rules = {
     { required: true, message: '请填写物品名称', trigger: 'blur' },
     { max: 64, message: '名称最多 64 个字', trigger: 'blur' }
   ],
-  parentCategory: [{ required: true, message: '请选择类目', trigger: 'change' }],
+  parentCategoryId: [{ required: true, message: '请选择一级类目', trigger: 'change' }],
   categoryId: [{ required: true, message: '请选择二级类目', trigger: 'change' }],
   communityId: [{ required: true, message: '请选择所在小区', trigger: 'change' }],
   dailyPrice: [{ required: true, message: '请填写日租金', trigger: 'blur' }],
@@ -110,7 +111,7 @@ async function loadEditData() {
     const group = categories.value.find((g) =>
       g.children.some((child) => String(child.id) === String(detail.categoryId))
     )
-    parentCategoryId.value = group ? group.id : null
+    form.parentCategoryId = group ? group.id : null
   } catch (e) {
     // 提示已由 request.js 统一弹出
   } finally {
@@ -122,7 +123,6 @@ function onParentChange() {
   // 换了一级类目，原来的二级类目必然失效
   form.categoryId = null
 }
-
 async function submit() {
   if (!formRef.value) return
   const valid = await formRef.value.validate().catch(() => false)
@@ -202,17 +202,25 @@ onMounted(async () => {
         <el-input v-model="form.title" maxlength="64" show-word-limit placeholder="例如：佳能 EOS 200D 单反机身" />
       </el-form-item>
 
-      <el-form-item label="类目" prop="parentCategory">
-        <div class="inline">
-          <el-select v-model="parentCategoryId" placeholder="一级类目" class="w-180" @change="onParentChange">
-            <el-option v-for="g in categories" :key="g.id" :label="g.name" :value="g.id" />
-          </el-select>
-          <el-form-item prop="categoryId" class="no-label">
-            <el-select v-model="form.categoryId" placeholder="二级类目" class="w-180" :disabled="!parentCategoryId">
-              <el-option v-for="c in childCategories" :key="c.id" :label="c.name" :value="c.id" />
-            </el-select>
-          </el-form-item>
-        </div>
+      <!-- 一级类目只用于筛出二级下拉；后端只接受二级类目 id，所以两个都必填但只有 categoryId 会提交 -->
+      <el-form-item label="一级类目" prop="parentCategoryId">
+        <el-select v-model="form.parentCategoryId" placeholder="先选一级类目" class="w-320" @change="onParentChange">
+          <el-option v-for="g in categories" :key="g.id" :label="g.name" :value="g.id" />
+        </el-select>
+      </el-form-item>
+
+      <el-form-item label="二级类目" prop="categoryId">
+        <el-select
+          v-model="form.categoryId"
+          :placeholder="form.parentCategoryId ? '选择二级类目' : '请先选一级类目'"
+          class="w-320"
+          :disabled="!form.parentCategoryId"
+        >
+          <el-option v-for="c in childCategories" :key="c.id" :label="c.name" :value="c.id" />
+        </el-select>
+        <span v-if="form.parentCategoryId && childCategories.length === 0" class="muted hint">
+          该一级类目下暂无二级类目，请联系管理员补充
+        </span>
       </el-form-item>
 
       <el-form-item label="所在小区" prop="communityId">
@@ -306,20 +314,6 @@ h1 {
 
 .form {
   padding: $space-6;
-}
-
-.inline {
-  display: flex;
-  align-items: center;
-  gap: $space-2;
-}
-
-.no-label {
-  margin-bottom: 0;
-}
-
-.w-180 {
-  width: 180px;
 }
 
 .w-320 {
