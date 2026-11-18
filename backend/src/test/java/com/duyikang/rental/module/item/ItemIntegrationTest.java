@@ -211,13 +211,22 @@ class ItemIntegrationTest {
 
     // ---------------------------------------------------------------- 检索与日历
 
+    /**
+     * 期望值从库里算，而不是写死"种子 6 件"：用户会在浏览器里真实发布物品（例如 id=16 大肥鱼），
+     * 写死行数会让测试因为"合法业务数据"而变红（PROJECT_RULES 坑：别把用户数据当种子）。
+     */
+    private long countOnShelf() {
+        return itemMapper.selectCount(Wrappers.<Item>lambdaQuery().eq(Item::getStatus, "ON_SHELF"));
+    }
+
     @Test
-    @DisplayName("检索：无筛选只返回在架物品（种子 6 件，待审核的 6 号不在内）")
+    @DisplayName("检索：无筛选只返回在架物品（待审核的 6 号不在内）")
     void list_noFilter_returnsOnlyOnShelf() {
+        long onShelf = countOnShelf();
         PageResult<ItemCardVO> page = itemService.list(new ItemQuery());
 
-        assertThat(page.getTotal()).isEqualTo(6L);
-        assertThat(page.getList()).hasSize(6);
+        assertThat(page.getTotal()).isEqualTo(onShelf);
+        assertThat(page.getList()).hasSize((int) Math.min(onShelf, 10L));
         assertThat(page.getList()).extracting(ItemCardVO::id).doesNotContain(6L);
         assertThat(page.getList()).allSatisfy(card -> assertThat(card.available()).isNull());
     }
@@ -235,6 +244,7 @@ class ItemIntegrationTest {
     @Test
     @DisplayName("检索：按可租日期过滤时排除被占用的物品（物品 2 占用 11-20~11-22）")
     void list_withDateRange_excludesOccupiedItem() {
+        long onShelf = countOnShelf();
         ItemQuery query = new ItemQuery();
         query.setStartDate(LocalDate.parse("2026-11-20"));
         query.setEndDate(LocalDate.parse("2026-11-23"));
@@ -242,7 +252,8 @@ class ItemIntegrationTest {
         PageResult<ItemCardVO> page = itemService.list(query);
 
         assertThat(page.getList()).extracting(ItemCardVO::id).doesNotContain(2L);
-        assertThat(page.getTotal()).isEqualTo(5L);
+        // 该窗口内只有物品 2 被占用，所以在架总数减 1；不写死数字，避免真实发布的数据把测试弄红
+        assertThat(page.getTotal()).isEqualTo(onShelf - 1);
         assertThat(page.getList()).allSatisfy(card -> assertThat(card.available()).isTrue());
     }
 

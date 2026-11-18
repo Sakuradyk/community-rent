@@ -92,9 +92,14 @@ class MapperIntegrationTest {
         // 同理：每注册一个账号就多一行 USER 角色绑定，这里只要求"种子 5 行还在"
         assertThat(userRoleMapper.selectCount(null)).isGreaterThanOrEqualTo(5L);
         assertThat(communityMapper.selectCount(null)).isEqualTo(6L);
-        assertThat(categoryMapper.selectCount(null)).isEqualTo(11L);
-        assertThat(itemMapper.selectCount(null)).isEqualTo(7L);
-        assertThat(itemImageMapper.selectCount(null)).isEqualTo(13L);
+        // 类目是「字典数据」，管理端可以继续加，所以只取下界（当前种子 7 个一级 × 21 个二级 = 28 行）
+        assertThat(categoryMapper.selectCount(null)).isGreaterThanOrEqualTo(28L);
+        // 物品与会随真实使用增长（用户在浏览器里发布 → 行数增加），因此校验"7 件种子物品都在"而不是总行数
+        assertThat(itemMapper.selectCount(new QueryWrapper<Item>().in("id", List.of(1L, 2L, 3L, 4L, 5L, 6L, 7L))))
+                .isEqualTo(7L);
+        // 同理：只数种子物品的图片（13 张），用户新发布的物品图片不计入
+        assertThat(itemImageMapper.selectCount(new QueryWrapper<com.duyikang.rental.module.item.entity.ItemImage>()
+                .le("item_id", 7L))).isEqualTo(13L);
         assertThat(rentalOrderMapper.selectCount(null)).isEqualTo(3L);
         assertThat(orderOccupancyMapper.selectCount(null)).isEqualTo(3L);
         assertThat(settlementMapper.selectCount(null)).isEqualTo(1L);

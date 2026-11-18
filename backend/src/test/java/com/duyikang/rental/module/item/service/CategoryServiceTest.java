@@ -22,18 +22,19 @@ class CategoryServiceTest {
     private CategoryService categoryService;
 
     @Test
-    @DisplayName("listEnabled：返回 11 个启用类目，一级 5 个、二级 6 个，且按层级与排序值升序")
+    @DisplayName("listEnabled：返回 28 个启用类目，一级 7 个、二级 21 个，且按层级与排序值升序")
     void listEnabled_returnsAllEnabledCategoriesOrderedByLevelAndSortNo() {
         List<CategoryVO> categories = categoryService.listEnabled();
 
-        assertThat(categories).hasSize(11);
-        assertThat(categories).filteredOn(c -> c.level() == 1).hasSize(5);
-        assertThat(categories).filteredOn(c -> c.level() == 2).hasSize(6);
+        assertThat(categories).hasSize(28);
+        assertThat(categories).filteredOn(c -> c.level() == 1).hasSize(7);
+        assertThat(categories).filteredOn(c -> c.level() == 2).hasSize(21);
 
-        // 一级在前（level 升序），一级内部按 sort_no（10/20/30/40/50）排序
+        // 一级在前（level 升序），一级内部按 sort_no（10/20/30/40/50/60/70）排序
         assertThat(categories.get(0).name()).isEqualTo("电子数码");
         assertThat(categories.get(0).parentId()).isZero();
         assertThat(categories.get(4).name()).isEqualTo("家居生活");
+        assertThat(categories.get(6).name()).isEqualTo("母婴玩具");
 
         // 二级类目的 parentId 必须指向真实的一级类目（前端靠它组织两级下拉）
         List<Long> levelOneIds = categories.stream()
