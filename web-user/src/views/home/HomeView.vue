@@ -1,61 +1,264 @@
-<template>
-  <div class="page-container">
-    <section class="hero card">
-      <h1 class="hero-title">邻里之间，借来借去</h1>
-      <p class="muted hero-sub">同小区优先 · 按时归还 · 押金按损耗退</p>
-      <div class="hero-actions">
-        <el-button v-if="!userStore.isLogin" type="primary" @click="router.push({ name: 'register' })">注册开始使用</el-button>
-        <el-button v-else type="primary" @click="router.push({ name: 'mine' })">进入我的主页</el-button>
-        <el-button @click="scrollToBoard">查看开发进度</el-button>
-      </div>
-    </section>
-
-    <section class="card board" id="board">
-      <h2 class="section-title">功能进度（前后端一起交付）</h2>
-      <el-table :data="slices" size="small" style="width: 100%">
-        <el-table-column prop="name" label="切片" width="120" />
-        <el-table-column prop="demo" label="你现在能在这里做什么" />
-        <el-table-column prop="status" label="状态" width="120">
-          <template #default="{ row }">
-            <el-tag :type="row.done ? 'success' : 'info'" size="small">{{ row.done ? '已可用' : '开发中' }}</el-tag>
-          </template>
-        </el-table-column>
-      </el-table>
-      <p class="muted tip">物品与订单尚未开放：后端接口写完一个，这里就开放一个入口，不做假数据。</p>
-    </section>
-  </div>
-</template>
-
 <script setup>
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import ItemCard from '@/components/ItemCard.vue'
+import { listItems } from '@/api/item'
+import { listCategories } from '@/api/category'
 import { useUserStore } from '@/stores/user'
+import { groupCategories } from '@/utils/constants'
 
 const router = useRouter()
 const userStore = useUserStore()
 
-const slices = [
-  { name: '账号', demo: '注册 / 登录 / 改昵称 / 传头像 / 退出', done: true },
-  { name: '物品', demo: '发布闲置、按小区浏览、管理员审核', done: false },
-  { name: '下单', demo: '选日期、看是否被占、冲突时给建议', done: false },
-  { name: '订单流转', demo: '确认 / 取用 / 归还 / 取消', done: false },
-  { name: '结算与信誉', demo: '租金逾期损耗明细、信誉分变化', done: false },
-  { name: '推荐与看板', demo: '带理由的推荐、管理端统计', done: false }
-]
+const loading = ref(false)
+const items = ref([])
+const total = ref(0)
+const categories = ref([])
 
-function scrollToBoard() {
-  document.getElementById('board')?.scrollIntoView({ behavior: 'smooth' })
+const communityName = computed(() => userStore.profile?.communityName || '')
+
+async function load() {
+  loading.value = true
+  try {
+    const [page, categoryList] = await Promise.all([
+      listItems({ pageNum: 1, pageSize: 8 }),
+      listCategories().catch(() => [])
+    ])
+    items.value = page.list || []
+    total.value = page.total || 0
+    categories.value = groupCategories(categoryList)
+  } catch (e) {
+    items.value = []
+    total.value = 0
+  } finally {
+    loading.value = false
+  }
 }
+
+function goCategory(categoryId) {
+  // 带上类目跳列表页，列表页会把 query 当初始筛选条件
+  router.push({ name: 'items', query: { categoryId } })
+}
+
+onMounted(load)
 </script>
+
+<template>
+  <div class="page-container">
+    <section class="hero">
+      <div class="hero-text">
+        <p class="eyebrow">
+          <template v-if="userStore.isLogin && communityName">你的小区：{{ communityName }}</template>
+          <template v-else>邻里之间，借来借去</template>
+        </p>
+        <h1>邻居家的电钻<br />不用买，租三天</h1>
+        <p class="sub">
+          同一时段只租给一个人，费用按天自动结算，用坏了按损耗规则赔。不涉及真实资金，演示环境。
+        </p>
+        <div class="hero-actions">
+          <el-button type="primary" size="large" @click="router.push({ name: 'items' })">
+            去看看有什么
+          </el-button>
+          <el-button v-if="userStore.isLogin" size="large" @click="router.push({ name: 'item-publish' })">
+            发布我的闲置
+          </el-button>
+          <el-button v-else size="large" @click="router.push({ name: 'register' })">注册后发布</el-button>
+        </div>
+      </div>
+      <ul class="hero-points">
+        <li>
+          <strong>同一时段只有一个人</strong>
+          <span>下单时用「预检 + 分布式锁 + 数据库唯一索引」三层防重复占用</span>
+        </li>
+        <li>
+          <strong>结算不用找管理员</strong>
+          <span>归还后按日租金、逾期费率、损耗规则自动算出应退押金</span>
+        </li>
+        <li>
+          <strong>每条推荐都有理由</strong>
+          <span>推荐结果附「为什么推给你」，不做黑盒排序</span>
+        </li>
+      </ul>
+    </section>
+
+    <section v-if="categories.length" class="categories">
+      <button
+        v-for="group in categories"
+        :key="group.id"
+        type="button"
+        class="category-chip"
+        @click="goCategory(group.id)"
+      >
+        <span class="chip-name">{{ group.name }}</span>
+        <span class="chip-sub">{{ group.children.map((c) => c.name).join(' / ') }}</span>
+      </button>
+    </section>
+
+    <section class="latest">
+      <header class="latest-head">
+        <div>
+          <h2>最新上架</h2>
+          <p class="muted">共 {{ total }} 件物品可租</p>
+        </div>
+        <el-button text @click="router.push({ name: 'items' })">查看全部 →</el-button>
+      </header>
+
+      <div v-loading="loading" class="grid">
+        <ItemCard v-for="item in items" :key="item.id" :item="item" />
+      </div>
+      <el-empty v-if="!loading && items.length === 0" description="还没有上架的物品" />
+    </section>
+  </div>
+</template>
 
 <style scoped lang="scss">
 @use '@/assets/styles/variables.scss' as *;
 
-.hero { padding: 40px 28px; text-align: center; }
-.hero-title { margin: 0 0 8px; font-size: 28px; color: $color-primary; }
-.hero-sub { margin: 0 0 24px; }
-.hero-actions { display: flex; gap: 12px; justify-content: center; }
+.hero {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: $space-6;
+  padding: $space-8;
+  border-radius: $radius-lg;
+  background: linear-gradient(150deg, #fdf1e6, #fbe0c9 60%, #f8cda8);
+  margin-bottom: $space-6;
 
-.board { margin-top: 20px; }
-.section-title { margin: 0 0 16px; font-size: 18px; }
-.tip { margin: 12px 0 0; }
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+    padding: $space-6;
+  }
+}
+
+.eyebrow {
+  margin: 0 0 $space-2;
+  font-size: $font-size-sm;
+  color: $color-wood;
+  letter-spacing: 0.04em;
+}
+
+.hero-text h1 {
+  margin: 0 0 $space-3;
+  font-size: 34px;
+  line-height: 1.25;
+  color: $color-text;
+}
+
+.sub {
+  margin: 0 0 $space-4;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  max-width: 30em;
+}
+
+.hero-actions {
+  display: flex;
+  gap: $space-3;
+  flex-wrap: wrap;
+}
+
+.hero-points {
+  margin: 0;
+  padding: $space-4 $space-4 $space-4 $space-6;
+  list-style: none;
+  background: rgba(255, 255, 255, 0.62);
+  border-radius: $radius-base;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: $space-3;
+
+  li {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  strong {
+    font-size: $font-size-sm;
+    color: $color-text;
+  }
+
+  span {
+    font-size: $font-size-xs;
+    color: $color-text-secondary;
+    line-height: 1.5;
+  }
+}
+
+.categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $space-2;
+  margin-bottom: $space-6;
+}
+
+.category-chip {
+  flex: 1 1 160px;
+  min-width: 150px;
+  padding: $space-3 $space-4;
+  text-align: left;
+  background: $color-surface;
+  border: 1px solid $color-border;
+  border-radius: $radius-base;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+
+  &:hover {
+    border-color: $color-primary;
+    box-shadow: $shadow-sm;
+  }
+}
+
+.chip-name {
+  display: block;
+  font-size: $font-size-sm;
+  font-weight: 600;
+  color: $color-text;
+}
+
+.chip-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.latest-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: $space-4;
+
+  h2 {
+    margin: 0;
+    font-size: $font-size-lg;
+  }
+
+  p {
+    margin: 2px 0 0;
+    font-size: $font-size-xs;
+  }
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: $space-4;
+  min-height: 200px;
+
+  @media (max-width: 1100px) {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  @media (max-width: 780px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  @media (max-width: 520px) {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

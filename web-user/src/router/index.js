@@ -32,6 +32,31 @@ const routes = [
         meta: { title: '首页' }
       },
       {
+        path: 'items',
+        name: 'items',
+        component: () => import('@/views/item/ItemListView.vue'),
+        meta: { title: '逛物品' }
+      },
+      // 静态路径必须排在 '/items/:id' 之前，否则 publish/mine 会被当成物品 id
+      {
+        path: 'items/publish',
+        name: 'item-publish',
+        component: () => import('@/views/item/ItemPublishView.vue'),
+        meta: { title: '发布物品', requiresAuth: true }
+      },
+      {
+        path: 'items/mine',
+        name: 'item-mine',
+        component: () => import('@/views/item/ItemMineView.vue'),
+        meta: { title: '我的物品', requiresAuth: true }
+      },
+      {
+        path: 'items/:id',
+        name: 'item-detail',
+        component: () => import('@/views/item/ItemDetailView.vue'),
+        meta: { title: '物品详情' }
+      },
+      {
         path: 'mine',
         name: 'mine',
         component: () => import('@/views/mine/ProfileView.vue'),

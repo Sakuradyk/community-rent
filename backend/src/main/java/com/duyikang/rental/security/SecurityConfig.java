@@ -73,6 +73,8 @@ public class SecurityConfig {
                                 // 社区下拉是注册页/发布页的公共字典：未登录也要能拉到，否则注册页空着没法填。
                                 // 只读、无用户数据，故放行（PROJECT_RULES.md §4.3：Controller 只读不写）。
                                 "/api/communities",
+                                // 类目字典同理：列表筛选与发布页都要用，游客浏览列表也要能按类目筛选。
+                                "/api/categories",
                                 "/error",
                                 "/favicon.ico"
                         ).permitAll()

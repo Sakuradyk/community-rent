@@ -9,6 +9,13 @@
 
         <nav class="nav">
           <router-link to="/" class="nav-item">首页</router-link>
+          <router-link :to="{ name: 'items' }" class="nav-item">逛物品</router-link>
+          <router-link v-if="userStore.isLogin" :to="{ name: 'item-publish' }" class="nav-item">
+            发布
+          </router-link>
+          <router-link v-if="userStore.isLogin" :to="{ name: 'item-mine' }" class="nav-item">
+            我的物品
+          </router-link>
           <router-link to="/mine" class="nav-item">我的</router-link>
         </nav>
 

@@ -18,6 +18,12 @@ const routes = [
         name: 'dashboard',
         component: () => import('@/views/dashboard/DashboardView.vue'),
         meta: { title: '概览', requiresAdmin: true }
+      },
+      {
+        path: 'audit',
+        name: 'audit',
+        component: () => import('@/views/audit/AuditView.vue'),
+        meta: { title: '物品审核', requiresAdmin: true }
       }
     ]
   },

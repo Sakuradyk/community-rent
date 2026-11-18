@@ -59,6 +59,13 @@ export const ITEM_STATUS = {
   REJECTED: { label: '已驳回', tag: 'danger', color: '#b91c1c' }
 }
 
+/** 物品维护状态（详情页展示，来自 ItemDetailVO.maintenanceState） */
+export const MAINTENANCE_STATE = {
+  NORMAL: { label: '状态良好', tag: 'success', color: '#15803d' },
+  MAINTAIN: { label: '需保养', tag: 'warning', color: '#b45309' },
+  REPAIR: { label: '需检修', tag: 'danger', color: '#b91c1c' }
+}
+
 /** 账号状态 */
 export const USER_STATUS = {
   NORMAL: { label: '正常', tag: 'success', color: '#15803d' },
@@ -94,4 +101,23 @@ export const PHONE_PATTERN = /^1[3-9]\d{9}$/
 /** 状态取展示信息，未知值兜底，避免页面因后端新增状态白屏 */
 export function statusOf(dict, value) {
   return dict[value] || { label: value || '未知', tag: 'info', color: '#57534e' }
+}
+
+/**
+ * 把扁平的类目字典组装成两级结构，供发布页级联选择与列表筛选用。
+ *
+ * 为什么在前端组：类目最多两级、总共十几行，后端返回扁平数组既省一次接口，
+ * 也不会因为"前端要树、后端改 VO"而触发契约变更。
+ *
+ * @param {Array} categories listCategories() 的返回值
+ * @returns {Array<{ id: string, name: string, children: Array }>}
+ */
+export function groupCategories(categories) {
+  const list = Array.isArray(categories) ? categories : []
+  const levelOne = list.filter((c) => c.level === 1)
+  return levelOne.map((parent) => ({
+    id: parent.id,
+    name: parent.name,
+    children: list.filter((c) => c.level === 2 && c.parentId === parent.id)
+  }))
 }

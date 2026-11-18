@@ -12,7 +12,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.13 · 2026-11-17 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
+> **版本**：v1.14 · 2026-11-18 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
 
 ---
 
@@ -282,7 +282,7 @@ web-admin/
 
 与后端四层（Controller/Service/Mapper/Entity）是**同构的**：页面层↔Controller、组件层↔VO、数据层↔Service/Mapper、基础层↔common。论文里可直接对比着写。
 
-### 4.6 前端硬性规则（F1–F15）
+### 4.6 前端硬性规则（F1–F16）
 
 | 编号 | 规则 | 违反后果 |
 | :-- | :-- | :-- |
@@ -301,6 +301,7 @@ web-admin/
 | **F13** | 要「假数据」只能放 `src/mock/*.js` 并在提交说明里标注**哪几个接口还是 mock**；不许把假数据写进 views 假装功能已完成 | 答辩演示时数据全是假的 |
 | **F14** | 前端同样受 §13 AI 准则约束：先说方案再写文件、一次只改点名文件、不新增依赖、不写 TODO 当完成 | — |
 | **F15** | **凭据只允许「混淆存本地」，且必须可一键清除**：记住密码等本地保存的密码只能经 `utils/remember.js` 做 base64 混淆后进 `localStorage`，注释里必须写明「非加密」；密码/令牌**禁止进日志、URL query、`sessionStorage` 之外的第三方上报**，取消勾选或改密后必须清除 | 明文密码出现在 DevTools/日志/截图里；换浏览器或共用电脑时密码泄漏 |
+| **F16** | **字典是数据，枚举是契约**：类目、社区这类会随管理端增删的「字典」只能通过公开字典接口拉（`/api/categories`、`/api/communities`），禁止在前端写死类目名/小区名，也禁止把它们塞进 `constants.js` 冒充枚举；`constants.js` 只放**状态机取值**这类必须与后端逐字一致的契约 | 管理端加了一个类目，前端下拉里没有；或前端硬编码的名字与库里改名后不一致 |
 
 ### 4.7 页面清单（= 开发排期依据）
 
@@ -310,7 +311,7 @@ web-admin/
 | :-- | :-- | :-- | :-- |
 | 登录 / 注册 | `/login` `/register` | FR-M1-01 | P0 |
 | 忘记密码（知识校验式重置） | `/forgot` | FR-M1-01 | P0 |
-| 首页（含推荐位） | `/home` | FR-M5-01~04 | P1 |
+| 首页（含推荐位） | `/` | FR-M5-01~04 | P1 |
 | 物品列表 / 搜索 | `/items` | FR-M1-03 | P0 |
 | 物品详情（占用日历+试算） | `/items/:id` | FR-M1-04、FR-M2-01 | P0 |
 | 下单确认页 | `/orders/create?itemId=` | FR-M1-06、FR-M3-01 | P0 |
@@ -320,7 +321,9 @@ web-admin/
 | 我的物品 | `/items/mine` | FR-M1-09 | P0 |
 | 我的信誉分 | `/credit` | FR-M4-01 | P0 |
 | 消息中心 | `/messages` | FR-M1-10 | P1 |
-| 个人中心 | `/profile` | FR-M1-01 | P1 |
+| 个人中心 | `/mine` | FR-M1-01 | P1 |
+
+> **已交付（截至 2026-11-18）**：登录/注册、忘记密码、首页（物品卡片流 + 类目入口）、物品列表、物品详情（含占用日历）、发布物品（多图）、我的物品、个人中心。**未交付**：下单确认页、我的订单、订单详情、我的信誉分、消息中心、首页推荐位（切片 3–6）。路由与上表必须一致，改路由就得改这一行。
 
 **管理端 web-admin**
 
@@ -332,6 +335,8 @@ web-admin/
 | 纠纷裁决 | `/appeals` | FR-M6-05 | P1 |
 | 数据看板（含逾期扫描按钮） | `/dashboard` | FR-M2-05、FR-M3-06 | P1 |
 | 用户管理 | `/users` | — | P2 |
+
+> **已交付（截至 2026-11-18）**：登录、物品审核（列表默认只看待审核，通过即上架、驳回必须写原因）。**未交付**：策略配置、纠纷裁决、数据看板（含「立即执行逾期扫描」按钮）、用户管理。
 
 ### 4.8 数据源：Druid 配置契约
 
@@ -884,3 +889,4 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-17 | 项目负责人 | **v1.11（ElMessage 样式缺陷）**：§4.6 F5 补充——`ElMessage`/`ElMessageBox`/`ElNotification` 是函数式 API，不进模板，`unplugin-vue-components` 的样式注入对它们无效；显式 `import { ElMessage } from 'element-plus'` 只拿到 JS 函数，须在 `src/main.js` 手工 `import 'element-plus/theme-chalk/el-message.css'`（+`el-message-box.css`）。症状极具迷惑性：**接口确实返回 2001，界面上却什么都没有**（消息 div 被渲染在文档流末尾、视口之外）。配套实绩：`web-user`/`web-admin` 的 `main.js` 各加两行样式引入，重跑 `npm run build` 后 `dist` 的 CSS 中 `.el-message{` 由 0 命中变为命中 |
 | 2026-11-17 | 项目负责人 | **v1.12（记住密码与忘记密码落地）**：①§4.6 新增 **F15**——凭据只允许经 `utils/remember.js` 做 base64 混淆后进 `localStorage`，注释须写明「非加密」，密码/令牌禁止进日志与 URL，取消勾选或改密后必须清除；②§4.7 页面清单补「忘记密码 `/forgot`」（P0，与登录同档，用户进不去时要能从登录页一步到达）；③`POST /api/auth/reset-password` 的设计边界写进 `docs/接口文档.md` §1.9：**三种要素不匹配统一一句 2001 文案**（否则接口沦为账号探测器）、重置成功即作废该用户全部 refresh 令牌、以「知识校验」替代短信验证码（无通道，需求总结 §10）；④配套实绩：`ResetPasswordDTO` + `AuthServiceImpl.resetPassword`（`@Transactional`，只更新 `password_hash`，随后 `refreshTokenStore.remove`）+ `AuthController` 新端点 + `SecurityConfig` 放行；`AuthIntegrationTest` 3 例（改密后旧密码 1005 / 新密码可登录 / 旧 refresh 1003；三要素不匹配文案一致；未设社区账号跳过社区校验），测试总数 47 → **50/50**；前端新增 `utils/remember.js`、`views/auth/ForgotView.vue`、`LoginView` 的记住密码与忘记密码入口，`npm run build` 通过（含 `ForgotView` 独立分块）；⑤顺带修两处**测试自身缺陷**：`MapperIntegrationTest` 不再锁死 `user`/`user_role` 总行数（浏览器注册会合法地让条数增长，改为校验 4 个种子手机号存在 + 分页用下界断言）、`JwtUtilTest`/`JwtAuthenticationFilterTest` 的篡改用例改打**签名段首字符**（32 字节 HMAC 的 base64url 末字符含 2 个无关位，改末字符可能解码出相同签名 → 偶发假失败），并给过滤器测试补 `@BeforeEach` 清 `SecurityContextHolder`（Spring 测试残留登录态会污染它）；⑥口径变更已备案：需求总结 §14.1「找回密码：原不做 → 知识校验式重置」 |
 | 2026-11-17 | 项目负责人 | **v1.13（前端视觉基线定档）**：①新增 §4.9——风格定档「温暖亲切 / 主色暖橙 / 宽松舒适 12px 圆角」，并规定**唯一取值来源**（两端 `variables.scss` 的色/字/距/圆角、`global.scss` 的 `:root` EP 覆盖、`constants.js` 的六状态 `color`、`AuthLayout`/`DefaultLayout` 作为版式样板）；②硬规则六条——主色分三层（`#ea580c` 交互填充 3.6:1 / `#f97316` 仅图形不承载小字 / `#c2410c` 白底文字 5.2:1）、字号只五档间距只七档、状态色只从字典取、主题改动必须 build 后 grep `--el-color-primary` 自查、不做暗色/插画/动效库/自定义图标、视觉打磨每次 ≤1 天且不得挤占 K2/K3；③配套实绩：`web-user` 重写 `variables.scss`（暖橙 21 个颜色 token + 五档字号 + 七档间距 + 三档圆角 + 三档暖色阴影）与 `global.scss`（`:root` 覆盖 EP 含 `-light-3/5/7/8/9`/`-dark-2`），新增 `layout/AuthLayout.vue`（左右分栏 + 纯 CSS 光斑 + 三条硬指标展示，≤900px 上下堆叠），`LoginView`/`RegisterView`/`ForgotView` 统一套用，`DefaultLayout` 重做顶栏（logo 方块 + 导航下划线 + 吸顶毛玻璃），`constants.js` 三张状态字典加 `color` 字段；`web-admin` 新增 `variables.scss`（管理端更紧凑一套）与同族 `global.scss`；两端 `npm run build` 通过（用户端含 `AuthLayout`/各视图独立分块） |
+| 2026-11-18 | 项目负责人 | **v1.14（切片 2 前端落地 + 类目字典补契约）**：①§4.7 页面清单按实际交付校准——首页路由 `/home` → `/`、个人中心 `/profile` → `/mine`，并补两张「已交付 / 未交付」清单（路由与清单必须同步，改路由就改这行）；②新增 §4.6 **F16**——列表/详情/发布页要用的字典（类目、社区）只走公开字典接口，**禁止在前端写死类目名或小区名**，也禁止把字典塞进 `constants.js` 当"伪枚举"（字典是数据，会随管理端增删；枚举是契约，必须与后端逐字一致）；③配套实绩：后端补 `GET /api/categories`（`CategoryVO` + `CategoryService` + `CategoryController`，`SecurityConfig` 放行，`CategoryServiceTest` 1 例，测试总数 74 → **75/75**），并在 `docs/接口文档.md` 以 **CONTRACT CHANGE** 方式登记 §2.12（冻结 §2 时遗漏了发布/筛选都要用的类目数据源）；前端 `web-user` 新增 `api/item.js`、`api/category.js`、`components/ItemCard.vue`、`components/OccupancyCalendar.vue`、`views/item/{ItemListView,ItemDetailView,ItemPublishView,ItemMineView}.vue`，`HomeView` 的切片进度表换成真实物品卡片流 + 类目入口，`DefaultLayout` 补「逛物品 / 发布 / 我的物品」导航；`web-admin` 新增 `api/item.js`、`views/audit/AuditView.vue`（默认只看待审核、通过即上架、驳回必须写原因）、`constants.js` 补 `ITEM_STATUS`；两端 `npm run build` 通过；④联调实测 31 条断言全过（经 8081 实例 + 仓库内 `.g3_front.mjs`，脚本已删除）：字典 11/5 条、匿名列表 total 6、详情图集 2 张、日历占用 11-20/21/22、非法月份 2003、发布多图 → 驳回（审核意见透出）→ 编辑回待审且审核意见清空 → 通过 → 公开列表可搜 → 下架消失 → 删除，以及匿名 1001 / 普通用户访问管理端 1002 |
