@@ -107,7 +107,7 @@ class MapperIntegrationTest {
         assertThat(creditPolicyMapper.selectCount(null)).isEqualTo(1L);
         assertThat(feePolicyMapper.selectCount(null)).isEqualTo(1L);
         assertThat(lossPolicyMapper.selectCount(null)).isEqualTo(1L);
-        assertThat(sysConfigMapper.selectCount(null)).isEqualTo(9L);
+        assertThat(sysConfigMapper.selectCount(null)).isEqualTo(10L);
     }
 
     @Test

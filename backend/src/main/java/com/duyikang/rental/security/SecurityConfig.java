@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -49,6 +50,15 @@ public class SecurityConfig {
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // 顺序敏感："/api/items/mine" 会被下面的 "/api/items/*" 匹配到，
+                        // 所以必须先声明"要登录"，否则我的物品列表变成匿名可查（越权）。
+                        .requestMatchers(HttpMethod.GET, "/api/items/mine").authenticated()
+                        // 浏览类接口匿名放行：游客能看列表/详情/日历，登录后才多一层"同小区优先"排序。
+                        // 只放 GET，发布/编辑/上下架/删除仍走 anyRequest().authenticated()。
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/items",
+                                "/api/items/*",
+                                "/api/items/*/calendar").permitAll()
                         .requestMatchers(
                                 "/api/auth/login",
                                 "/api/auth/register",

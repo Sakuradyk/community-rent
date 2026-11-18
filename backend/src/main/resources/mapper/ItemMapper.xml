@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  物品模块里唯一需要手写 SQL 的三条查询。
+  其余增删改查全部走 MyBatis-Plus 的 BaseMapper / LambdaQueryWrapper（避免为一两个字段写 XML）。
+
+  为什么排序写在 SQL 里而不在 Java 里排：
+  分页必须"先在数据库排好再取第 N 页"。若先查出一页再在内存里按社区重排，
+  第 2 页会出现第 1 页的物品（用户翻页看到重复项），这是分页排序最典型的坑。
+-->
+<mapper namespace="com.duyikang.rental.module.item.mapper.ItemMapper">
+
+    <!-- 列表页：只出在架物品，支持关键词/类目/社区/价格区间/可租日期 -->
+    <select id="selectForSale" resultType="com.duyikang.rental.module.item.entity.Item">
+        SELECT i.*
+        FROM item i
+        JOIN community c ON c.id = i.community_id
+        WHERE i.deleted = 0
+          AND i.status = 'ON_SHELF'
+        <if test="q.keyword != null and q.keyword != ''">
+            AND (i.title LIKE CONCAT('%', #{q.keyword}, '%')
+                 OR i.description LIKE CONCAT('%', #{q.keyword}, '%'))
+        </if>
+        <if test="categoryIds != null and categoryIds.size() > 0">
+            AND i.category_id IN
+            <foreach collection="categoryIds" item="cid" open="(" separator="," close=")">
+                #{cid}
+            </foreach>
+        </if>
+        <if test="q.communityId != null">
+            AND i.community_id = #{q.communityId}
+        </if>
+        <if test="q.minPrice != null">
+            AND i.daily_price &gt;= #{q.minPrice}
+        </if>
+        <if test="q.maxPrice != null">
+            AND i.daily_price &lt;= #{q.maxPrice}
+        </if>
+        <if test="excludedIds != null and excludedIds.size() > 0">
+            AND i.id NOT IN
+            <foreach collection="excludedIds" item="eid" open="(" separator="," close=")">
+                #{eid}
+            </foreach>
+        </if>
+        ORDER BY
+        <if test="priorityEnabled and myCommunityId != null">
+            CASE WHEN i.community_id = #{myCommunityId} THEN 1 ELSE 0 END DESC,
+        </if>
+        <if test="priorityEnabled and myDistrict != null">
+            CASE WHEN c.district = #{myDistrict} THEN 1 ELSE 0 END DESC,
+        </if>
+        i.rent_count DESC, i.created_at DESC, i.id DESC
+    </select>
+
+    <!-- 可租日期筛选：命中的物品直接排除。半开区间 [from, to)，与日历、下单同一口径 -->
+    <select id="selectOccupiedItemIds" resultType="java.lang.Long">
+        SELECT DISTINCT o.item_id
+        FROM order_occupancy o
+        JOIN rental_order r ON r.id = o.order_id
+        WHERE r.status IN ('CONFIRMED', 'IN_USE', 'OVERDUE')
+          AND o.occupy_date &gt;= #{from}
+          AND o.occupy_date &lt; #{to}
+    </select>
+
+    <!-- 日历：某物品在 [from, to) 内被占用的日期，升序去重 -->
+    <select id="selectOccupiedDates" resultType="java.time.LocalDate">
+        SELECT DISTINCT o.occupy_date
+        FROM order_occupancy o
+        JOIN rental_order r ON r.id = o.order_id
+        WHERE o.item_id = #{itemId}
+          AND r.status IN ('CONFIRMED', 'IN_USE', 'OVERDUE')
+          AND o.occupy_date &gt;= #{from}
+          AND o.occupy_date &lt; #{to}
+        ORDER BY o.occupy_date
+    </select>
+
+</mapper>
