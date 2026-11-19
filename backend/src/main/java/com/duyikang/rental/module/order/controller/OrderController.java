@@ -1,11 +1,13 @@
 package com.duyikang.rental.module.order.controller;
 
+import com.duyikang.rental.common.result.PageResult;
 import com.duyikang.rental.common.result.Result;
 import com.duyikang.rental.module.order.dto.OrderCreateDTO;
 import com.duyikang.rental.module.order.dto.OrderQuoteDTO;
 import com.duyikang.rental.module.order.service.OrderService;
 import com.duyikang.rental.module.order.vo.OrderCreatedVO;
 import com.duyikang.rental.module.order.vo.OrderDetailVO;
+import com.duyikang.rental.module.order.vo.OrderListItemVO;
 import com.duyikang.rental.module.order.vo.OrderQuoteVO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -43,6 +46,19 @@ public class OrderController {
     @PostMapping
     public Result<OrderCreatedVO> create(@Valid @RequestBody OrderCreateDTO dto) {
         return Result.ok(orderService.create(dto));
+    }
+
+    /**
+     * 我的订单列表：{@code role} 取 {@code renter}（我租的）/ {@code owner}（我出租的）/ {@code all}，
+     * 可按状态过滤，按创建时间倒序分页（见接口文档 §3.6）。
+     */
+    @GetMapping
+    public Result<PageResult<OrderListItemVO>> list(
+            @RequestParam(required = false) String role,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false, defaultValue = "1") Integer pageNum,
+            @RequestParam(required = false, defaultValue = "10") Integer pageSize) {
+        return Result.ok(orderService.list(role, status, pageNum, pageSize));
     }
 
     /**

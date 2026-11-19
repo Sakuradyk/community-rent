@@ -3,6 +3,7 @@ package com.duyikang.rental.module.order;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.duyikang.rental.common.constant.ErrorCode;
 import com.duyikang.rental.common.exception.BizException;
+import com.duyikang.rental.common.result.PageResult;
 import com.duyikang.rental.module.order.dto.OrderCreateDTO;
 import com.duyikang.rental.module.order.dto.OrderQuoteDTO;
 import com.duyikang.rental.module.order.entity.OrderOccupancy;
@@ -12,6 +13,7 @@ import com.duyikang.rental.module.order.mapper.RentalOrderMapper;
 import com.duyikang.rental.module.order.service.OrderService;
 import com.duyikang.rental.module.order.vo.OrderCreatedVO;
 import com.duyikang.rental.module.order.vo.OrderDetailVO;
+import com.duyikang.rental.module.order.vo.OrderListItemVO;
 import com.duyikang.rental.module.order.vo.OrderQuoteVO;
 import com.duyikang.rental.module.item.entity.Item;
 import com.duyikang.rental.module.item.mapper.ItemMapper;
@@ -282,6 +284,74 @@ class OrderIntegrationTest {
         assertThatThrownBy(() -> orderService.detail(999_999L))
                 .isInstanceOfSatisfying(BizException.class,
                         e -> assertThat(e.getCode()).isEqualTo(ErrorCode.ORDER_NOT_FOUND.getCode()));
+    }
+
+    // ------------------------------------------------------------------ 我的订单列表
+
+    @Test
+    @DisplayName("列表：承租人视角能查到刚下的单，role=renter，对方昵称是出租方")
+    void list_asRenter_containsNewOrder() {
+        loginAs(OWNER_ZHANGWEI, "张伟", "USER");
+        LocalDate start = LocalDate.now().plusDays(30);
+        OrderCreatedVO created = orderService.create(new OrderCreateDTO(ITEM_LINA_DRILL, start, start.plusDays(2), null));
+
+        PageResult<OrderListItemVO> page = orderService.list("renter", null, 1, 100);
+
+        assertThat(page.getList()).extracting(OrderListItemVO::id).contains(created.id());
+        OrderListItemVO row = page.getList().stream()
+                .filter(o -> o.id().equals(created.id())).findFirst().orElseThrow();
+        assertThat(row.role()).isEqualTo("renter");
+        assertThat(row.counterpartyNickname()).isEqualTo("李娜");
+        assertThat(row.status()).isEqualTo("PENDING");
+        assertThat(row.statusLabel()).isEqualTo("待确认");
+        // start.plusDays(2) 表示租 2 天（半开区间），2 × 15.00 + 80.00 押金 = 110.00`n        assertThat(row.totalAmount()).isEqualByComparingTo("110.00");
+        assertThat(row.itemTitle()).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("列表：出租方视角 role=owner，对方昵称是承租人；承租人视角查不到这层的 owner 身份")
+    void list_asOwner_roleIsOwner() {
+        loginAs(OWNER_ZHANGWEI, "张伟", "USER");
+        LocalDate start = LocalDate.now().plusDays(35);
+        OrderCreatedVO created = orderService.create(new OrderCreateDTO(ITEM_LINA_DRILL, start, start.plusDays(1), null));
+
+        loginAs(RENTER_LINA, "李娜", "USER");
+        PageResult<OrderListItemVO> asOwner = orderService.list("owner", null, 1, 100);
+        OrderListItemVO row = asOwner.getList().stream()
+                .filter(o -> o.id().equals(created.id())).findFirst().orElseThrow();
+        assertThat(row.role()).isEqualTo("owner");
+        assertThat(row.counterpartyNickname()).isEqualTo("张伟");
+
+        // 同一笔订单在「我租的」里不应该出现（李娜是出租方）
+        assertThat(orderService.list("renter", null, 1, 100).getList())
+                .extracting(OrderListItemVO::id).doesNotContain(created.id());
+    }
+
+    @Test
+    @DisplayName("列表：status 过滤只返回该状态；all 视角两人都看得到")
+    void list_statusFilter_andAll() {
+        loginAs(OWNER_ZHANGWEI, "张伟", "USER");
+        LocalDate start = LocalDate.now().plusDays(40);
+        OrderCreatedVO created = orderService.create(new OrderCreateDTO(ITEM_LINA_DRILL, start, start.plusDays(1), null));
+
+        PageResult<OrderListItemVO> pending = orderService.list("all", "PENDING", 1, 100);
+        assertThat(pending.getList()).allMatch(o -> "PENDING".equals(o.status()));
+        assertThat(pending.getList()).extracting(OrderListItemVO::id).contains(created.id());
+
+        assertThat(orderService.list("all", "COMPLETED", 1, 100).getList())
+                .extracting(OrderListItemVO::id).doesNotContain(created.id());
+
+        // 分页口径：pageSize 上限 100，传 0/负数按默认走，不抛异常
+        assertThat(orderService.list("all", null, 0, 0).getPageNum()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("列表：未登录 → 1001")
+    void list_anonymous_throwsUnauthorized() {
+        SecurityContextHolder.clearContext();
+        assertThatThrownBy(() -> orderService.list("renter", null, 1, 10))
+                .isInstanceOfSatisfying(BizException.class,
+                        e -> assertThat(e.getCode()).isEqualTo(ErrorCode.UNAUTHORIZED.getCode()));
     }
 
     // ------------------------------------------------------------------ 工具

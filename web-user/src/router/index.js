@@ -57,6 +57,25 @@ const routes = [
         meta: { title: '物品详情' }
       },
       {
+        path: 'orders',
+        name: 'orders',
+        component: () => import('@/views/order/OrderListView.vue'),
+        meta: { title: '我的订单', requiresAuth: true }
+      },
+      // 同样：静态段 'orders/create' 必须排在 'orders/:id' 之前
+      {
+        path: 'orders/create',
+        name: 'order-create',
+        component: () => import('@/views/order/OrderCreateView.vue'),
+        meta: { title: '填写租用信息', requiresAuth: true }
+      },
+      {
+        path: 'orders/:id',
+        name: 'order-detail',
+        component: () => import('@/views/order/OrderDetailView.vue'),
+        meta: { title: '订单详情', requiresAuth: true }
+      },
+      {
         path: 'mine',
         name: 'mine',
         component: () => import('@/views/mine/ProfileView.vue'),

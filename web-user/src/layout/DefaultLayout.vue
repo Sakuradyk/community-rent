@@ -16,6 +16,9 @@
           <router-link v-if="userStore.isLogin" :to="{ name: 'item-mine' }" class="nav-item">
             我的物品
           </router-link>
+          <router-link v-if="userStore.isLogin" :to="{ name: 'orders' }" class="nav-item">
+            我的订单
+          </router-link>
           <router-link to="/mine" class="nav-item">我的</router-link>
         </nav>
 

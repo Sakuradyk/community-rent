@@ -122,11 +122,15 @@ onMounted(load)
             >
               编辑这件物品
             </el-button>
-            <el-tooltip v-else content="下单与费用计算在切片 3 开放（K2 三层防线）" placement="top">
-              <span>
-                <el-button type="primary" size="large" disabled>立即租用</el-button>
-              </span>
-            </el-tooltip>
+            <el-button
+              v-else
+              type="primary"
+              size="large"
+              :disabled="item.status !== 'ON_SHELF'"
+              @click="router.push({ name: 'order-create', query: { itemId: item.id } })"
+            >
+              立即租用
+            </el-button>
             <span class="muted hint">费用由后端统一计算，前端只展示（规则 F1）</span>
           </div>
         </section>

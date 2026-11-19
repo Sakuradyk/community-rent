@@ -35,4 +35,15 @@ public interface OrderService {
      * @throws com.duyikang.rental.common.exception.BizException 3005 订单不存在、3008 无权查看
      */
     OrderDetailVO detail(Long orderId);
+
+    /**
+     * 我的订单列表（我租的 / 我出租的），按创建时间倒序。
+     *
+     * @param role     {@code renter} 我租的、{@code owner} 我出租的、{@code all} 两者都看；空值按 {@code all}
+     * @param status   可选，六状态之一；空值不筛选
+     * @param pageNum  从 1 起
+     * @param pageSize 默认 10，上限 100
+     */
+    com.duyikang.rental.common.result.PageResult<com.duyikang.rental.module.order.vo.OrderListItemVO> list(
+            String role, String status, Integer pageNum, Integer pageSize);
 }

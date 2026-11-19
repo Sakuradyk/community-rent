@@ -1,11 +1,14 @@
 package com.duyikang.rental.module.order.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.duyikang.rental.common.constant.ErrorCode;
 import com.duyikang.rental.common.constant.ItemStatus;
 import com.duyikang.rental.common.constant.OrderStatus;
 import com.duyikang.rental.common.exception.BizException;
 import com.duyikang.rental.common.lock.RedisLock;
+import com.duyikang.rental.common.result.PageResult;
 import com.duyikang.rental.module.item.entity.Category;
 import com.duyikang.rental.module.item.entity.Community;
 import com.duyikang.rental.module.item.entity.Item;
@@ -21,6 +24,7 @@ import com.duyikang.rental.module.order.service.OrderService;
 import com.duyikang.rental.module.order.service.OrderTxService;
 import com.duyikang.rental.module.order.vo.OrderCreatedVO;
 import com.duyikang.rental.module.order.vo.OrderDetailVO;
+import com.duyikang.rental.module.order.vo.OrderListItemVO;
 import com.duyikang.rental.module.order.vo.OrderQuoteVO;
 import com.duyikang.rental.module.system.entity.SysConfig;
 import com.duyikang.rental.module.system.mapper.SysConfigMapper;
@@ -44,6 +48,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * 订单服务实现（K2 三层防线的**编排者**）。
@@ -77,6 +83,9 @@ public class OrderServiceImpl implements OrderService {
     /** 候选时段：最多给 3 个，向后最多扫 60 天 */
     private static final int SUGGEST_LIMIT = 3;
     private static final int SUGGEST_SCAN_DAYS = 60;
+    /** 分页：与全局口径一致（pageNum 从 1 起、pageSize 默认 10 上限 100） */
+    private static final int PAGE_SIZE_DEFAULT = 10;
+    private static final int PAGE_SIZE_MAX = 100;
 
     private final ItemMapper itemMapper;
     private final RentalOrderMapper rentalOrderMapper;
@@ -196,6 +205,67 @@ public class OrderServiceImpl implements OrderService {
                 owner == null ? null : new OrderDetailVO.Party(owner.getId(), owner.getNickname()),
                 renter == null ? null : new OrderDetailVO.Party(renter.getId(), renter.getNickname()),
                 order.getCreatedAt());
+    }
+
+    // ------------------------------------------------------------------ 我的订单列表
+
+    @Override
+    public PageResult<OrderListItemVO> list(String role, String status, Integer pageNum, Integer pageSize) {
+        LoginUser user = CurrentUser.require();
+        long page = pageNum == null || pageNum < 1 ? 1 : pageNum;
+        long size = pageSize == null || pageSize < 1 ? PAGE_SIZE_DEFAULT
+                : Math.min(pageSize, PAGE_SIZE_MAX);
+
+        LambdaQueryWrapper<RentalOrder> wrapper = Wrappers.<RentalOrder>lambdaQuery();
+        String normalizedRole = role == null ? "all" : role.trim().toLowerCase();
+        switch (normalizedRole) {
+            case "renter" -> wrapper.eq(RentalOrder::getRenterId, user.userId());
+            case "owner" -> wrapper.eq(RentalOrder::getOwnerId, user.userId());
+            default -> wrapper.and(w -> w.eq(RentalOrder::getRenterId, user.userId())
+                    .or().eq(RentalOrder::getOwnerId, user.userId()));
+        }
+        if (status != null && !status.isBlank()) {
+            wrapper.eq(RentalOrder::getStatus, status.trim());
+        }
+        wrapper.orderByDesc(RentalOrder::getCreatedAt).orderByDesc(RentalOrder::getId);
+
+        Page<RentalOrder> pageResult = rentalOrderMapper.selectPage(new Page<>(page, size), wrapper);
+        List<RentalOrder> orders = pageResult.getRecords();
+        if (orders.isEmpty()) {
+            return PageResult.empty(page, size);
+        }
+
+        // 批量取物品与用户，避免列表页 N+1（一页最多 100 条）
+        Map<Long, Item> itemMap = listByIds(orders.stream().map(RentalOrder::getItemId).distinct().toList(),
+                itemMapper::selectBatchIds).stream().collect(Collectors.toMap(Item::getId, i -> i));
+        Map<Long, User> userMap = listByIds(
+                orders.stream().flatMap(o -> Stream.of(o.getOwnerId(), o.getRenterId())).distinct().toList(),
+                userMapper::selectBatchIds).stream().collect(Collectors.toMap(User::getId, u -> u));
+
+        List<OrderListItemVO> list = orders.stream().map(order -> {
+            Item item = itemMap.get(order.getItemId());
+            boolean asRenter = order.getRenterId().equals(user.userId());
+            Long counterpartyId = asRenter ? order.getOwnerId() : order.getRenterId();
+            User counterparty = userMap.get(counterpartyId);
+            BigDecimal rentAmount = order.getRentAmount() == null ? BigDecimal.ZERO : order.getRentAmount();
+            BigDecimal deposit = order.getDeposit() == null ? BigDecimal.ZERO : order.getDeposit();
+            return new OrderListItemVO(
+                    order.getId(), order.getOrderNo(), order.getItemId(),
+                    item == null ? null : item.getTitle(),
+                    item == null ? null : item.getCoverUrl(),
+                    order.getStartDate(), order.getEndDate(), order.getRentDays(),
+                    rentAmount, deposit, rentAmount.add(deposit),
+                    order.getStatus(), OrderStatus.labelOf(order.getStatus()),
+                    asRenter ? "renter" : "owner",
+                    counterparty == null ? null : counterparty.getNickname(),
+                    order.getCreatedAt());
+        }).toList();
+
+        return PageResult.of(list, pageResult.getTotal(), page, size);
+    }
+
+    private <T> List<T> listByIds(List<Long> ids, java.util.function.Function<List<Long>, List<T>> loader) {
+        return ids.isEmpty() ? List.of() : loader.apply(ids);
     }
 
     // ------------------------------------------------------------------ 内部方法
