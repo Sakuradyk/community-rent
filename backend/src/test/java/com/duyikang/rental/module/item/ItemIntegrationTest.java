@@ -173,16 +173,19 @@ class ItemIntegrationTest {
     @Test
     @DisplayName("编辑：被驳回后修改，状态回到待审核且清空审核痕迹")
     void update_rejectedItem_resetsAuditTrail() {
+        // 自己造一件待审核物品：种子里的 item 6 会被用户在浏览器里审核掉，不能当固定夹具
+        Long pendingId = createPendingItem(4L, "王强");
+
         loginAs(1L, "平台管理员", "ADMIN");
-        itemAdminService.audit(6L, new ItemAuditDTO(false, "图片不清晰，请重拍"));
-        Item rejected = itemMapper.selectById(6L);
+        itemAdminService.audit(pendingId, new ItemAuditDTO(false, "图片不清晰，请重拍"));
+        Item rejected = itemMapper.selectById(pendingId);
         assertThat(rejected.getStatus()).isEqualTo("REJECTED");
         assertThat(rejected.getAuditRemark()).isEqualTo("图片不清晰，请重拍");
 
         loginAs(4L, "王强", "USER");
-        itemService.update(6L, saveDTO(imageUrls(2)));
+        itemService.update(pendingId, saveDTO(imageUrls(2)));
 
-        Item resubmitted = itemMapper.selectById(6L);
+        Item resubmitted = itemMapper.selectById(pendingId);
         assertThat(resubmitted.getStatus()).isEqualTo("PENDING");
         assertThat(resubmitted.getAuditRemark()).isNull();
         assertThat(resubmitted.getAuditAdminId()).isNull();
@@ -220,14 +223,15 @@ class ItemIntegrationTest {
     }
 
     @Test
-    @DisplayName("检索：无筛选只返回在架物品（待审核的 6 号不在内）")
+    @DisplayName("检索：无筛选只返回在架物品（待审核的新物品不在内）")
     void list_noFilter_returnsOnlyOnShelf() {
+        Long pendingId = createPendingItem(4L, "王强");
         long onShelf = countOnShelf();
         PageResult<ItemCardVO> page = itemService.list(new ItemQuery());
 
         assertThat(page.getTotal()).isEqualTo(onShelf);
         assertThat(page.getList()).hasSize((int) Math.min(onShelf, 10L));
-        assertThat(page.getList()).extracting(ItemCardVO::id).doesNotContain(6L);
+        assertThat(page.getList()).extracting(ItemCardVO::id).doesNotContain(pendingId);
         assertThat(page.getList()).allSatisfy(card -> assertThat(card.available()).isNull());
     }
 
@@ -301,13 +305,15 @@ class ItemIntegrationTest {
     @Test
     @DisplayName("详情：待审核物品对非归属人按「不存在」处理 → 3004")
     void detail_pendingItem_hiddenFromOthers() {
+        Long pendingId = createPendingItem(4L, "王强");
+
         loginAs(3L, "李娜", "USER");
-        assertThatThrownBy(() -> itemService.detail(6L))
+        assertThatThrownBy(() -> itemService.detail(pendingId))
                 .isInstanceOfSatisfying(BizException.class,
                         e -> assertThat(e.getCode()).isEqualTo(ErrorCode.ITEM_NOT_FOUND.getCode()));
 
         loginAs(4L, "王强", "USER");
-        assertThat(itemService.detail(6L).status()).isEqualTo("PENDING");
+        assertThat(itemService.detail(pendingId).status()).isEqualTo("PENDING");
     }
 
     // ---------------------------------------------------------------- 审核
@@ -315,10 +321,12 @@ class ItemIntegrationTest {
     @Test
     @DisplayName("审核：通过 → 在架，并记录审核人与时间")
     void audit_approve_movesToOnShelf() {
-        loginAs(1L, "平台管理员", "ADMIN");
-        itemAdminService.audit(6L, new ItemAuditDTO(true, null));
+        Long pendingId = createPendingItem(4L, "王强");
 
-        Item item = itemMapper.selectById(6L);
+        loginAs(1L, "平台管理员", "ADMIN");
+        itemAdminService.audit(pendingId, new ItemAuditDTO(true, null));
+
+        Item item = itemMapper.selectById(pendingId);
         assertThat(item.getStatus()).isEqualTo("ON_SHELF");
         assertThat(item.getAuditAdminId()).isEqualTo(1L);
         assertThat(item.getAuditTime()).isNotNull();
@@ -327,8 +335,10 @@ class ItemIntegrationTest {
     @Test
     @DisplayName("审核：驳回不给理由 → 2001")
     void audit_rejectWithoutRemark_throwsParamError() {
+        Long pendingId = createPendingItem(4L, "王强");
+
         loginAs(1L, "平台管理员", "ADMIN");
-        assertThatThrownBy(() -> itemAdminService.audit(6L, new ItemAuditDTO(false, "   ")))
+        assertThatThrownBy(() -> itemAdminService.audit(pendingId, new ItemAuditDTO(false, "   ")))
                 .isInstanceOfSatisfying(BizException.class,
                         e -> assertThat(e.getCode()).isEqualTo(ErrorCode.PARAM_ERROR.getCode()));
     }
@@ -345,10 +355,14 @@ class ItemIntegrationTest {
     @Test
     @DisplayName("审核列表：默认只出待审核，且带出租人脱敏手机号")
     void auditPage_defaultStatus_returnsPendingOnly() {
+        Long pendingId = createPendingItem(4L, "王强");
+
         PageResult<com.duyikang.rental.module.item.vo.AdminItemVO> page =
                 itemAdminService.page(null, null, 1, 10);
 
         assertThat(page.getList()).isNotEmpty();
+        assertThat(page.getList()).extracting(com.duyikang.rental.module.item.vo.AdminItemVO::id)
+                .contains(pendingId);
         assertThat(page.getList()).allSatisfy(vo -> {
             assertThat(vo.status()).isEqualTo("PENDING");
             if (vo.ownerPhone() != null) {
@@ -364,6 +378,17 @@ class ItemIntegrationTest {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(user, null,
                         List.of(new SimpleGrantedAuthority("ROLE_" + role))));
+    }
+
+    /**
+     * 造一件待审核物品并返回 id。
+     *
+     * <p>不要再用种子里的 item 6 当"待审核夹具"：那件物品会被用户在浏览器里审核/编辑，
+     * 测试断言立刻就过期（2026-11-19 已发生过一次）。测试要自己造数据，才有资格断言。</p>
+     */
+    private Long createPendingItem(long ownerId, String nickname) {
+        loginAs(ownerId, nickname, "USER");
+        return itemService.create(saveDTO(imageUrls(1)));
     }
 
     private ItemSaveDTO saveDTO(List<String> urls) {

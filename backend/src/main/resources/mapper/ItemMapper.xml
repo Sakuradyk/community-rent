@@ -58,7 +58,7 @@
         SELECT DISTINCT o.item_id
         FROM order_occupancy o
         JOIN rental_order r ON r.id = o.order_id
-        WHERE r.status IN ('CONFIRMED', 'IN_USE', 'OVERDUE')
+        WHERE r.status IN ('PENDING', 'CONFIRMED', 'IN_USE', 'OVERDUE')
           AND o.occupy_date &gt;= #{from}
           AND o.occupy_date &lt; #{to}
     </select>
@@ -69,7 +69,7 @@
         FROM order_occupancy o
         JOIN rental_order r ON r.id = o.order_id
         WHERE o.item_id = #{itemId}
-          AND r.status IN ('CONFIRMED', 'IN_USE', 'OVERDUE')
+          AND r.status IN ('PENDING', 'CONFIRMED', 'IN_USE', 'OVERDUE')
           AND o.occupy_date &gt;= #{from}
           AND o.occupy_date &lt; #{to}
         ORDER BY o.occupy_date

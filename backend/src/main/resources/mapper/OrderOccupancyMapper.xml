@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  订单占用相关 SQL。
+  注意：这里的"占用"要把 PENDING 算进去——下单即占时段（docs/接口文档.md §3.0），
+  否则待确认期间同一物品能被重复下单，唯一索引也就没机会拦。
+-->
+<mapper namespace="com.duyikang.rental.module.order.mapper.OrderOccupancyMapper">
+
+    <select id="selectOccupiedDates" resultType="java.time.LocalDate">
+        SELECT DISTINCT o.occupy_date
+        FROM order_occupancy o
+                 JOIN rental_order r ON r.id = o.order_id
+        WHERE o.item_id = #{itemId}
+          AND r.status IN ('PENDING', 'CONFIRMED', 'IN_USE', 'OVERDUE')
+          AND o.occupy_date &gt;= #{from}
+          AND o.occupy_date &lt; #{to}
+        ORDER BY o.occupy_date
+    </select>
+
+</mapper>

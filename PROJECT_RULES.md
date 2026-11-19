@@ -12,7 +12,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.14 · 2026-11-18 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
+> **版本**：v1.15 · 2026-11-19 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
 
 ---
 
@@ -139,13 +139,14 @@
 │   │   │   ├── result/           ← Result, PageResult
 │   │   │   ├── exception/        ← BizException, GlobalExceptionHandler
 │   │   │   ├── constant/         ← ErrorCode 及各枚举
-│   │   │   ├── util/             ← RedisUtil, DateRangeUtil, FeeCalculatorUtil
-│   │   │   └── config/           ← TraceIdFilter, MybatisPlusConfig, RedisConfig, WebMvcConfig
+│   │   │   ├── util/             ← FileStorageUtil, DateRangeUtil, FeeCalculatorUtil
+│   │   │   ├── lock/             ← RedisLock（SET NX PX + Lua 比对删除，K2 第二层）
+│   │   │   └── config/           ← TraceIdFilter, MybatisPlusConfig, JacksonConfig, WebMvcConfig, FileStorageProperties
 │   │   ├── security/             ← SecurityConfig, JwtUtil, JwtAuthenticationFilter, LoginUser
 │   │   ├── module/
 │   │   │   ├── user/             ← 用户与权限（controller/service/mapper/entity/dto/vo）
 │   │   │   ├── item/             ← 物品
-│   │   │   ├── order/            ← 订单与冲突检测（K2）
+│   │   │   ├── order/            ← 订单与冲突检测（K2）：OrderController / OrderService+Impl（加锁，无事务）/ OrderTxService+Impl（事务落库）
 │   │   │   ├── settlement/       ← 费用结算（K3）
 │   │   │   ├── credit/           ← 信誉分（K4）
 │   │   │   ├── recommend/        ← 推荐（K5）
@@ -159,7 +160,7 @@
 │   └── src/main/resources/       ← 注意：与 src/main/java 同级，不在 Java 包目录下
 │       ├── application.yml
 │       ├── application-dev.yml
-│       └── mapper/               ← MyBatis XML（复杂 SQL 才用 XML）
+│       └── mapper/               ← MyBatis XML（复杂 SQL 才用 XML：ItemMapper.xml 列表三档排序 / OrderOccupancyMapper.xml 占用查询）
 ├── web-user/                     ← 用户端 Vue 3 + Vite
 ├── web-admin/                    ← 管理端 Vue 3 + Vite + Element Plus
 └── docs/
@@ -631,7 +632,8 @@ Result<T> { int code; String message; T data; String traceId; }
 public Long createOrder(OrderCreateDTO dto) {
     String key = "lock:item:" + dto.getItemId();
     String val = UUID.randomUUID().toString();
-    if (!redisLock.tryLock(key, val, 10, TimeUnit.SECONDS)) throw new BizException(ErrorCode.LOCK_ACQUIRE_FAILED);
+    // 抢不到 → 按"错误码口径"伪装成 4090（**不是** 5003），且必须先做 500ms/10 次重试
+    if (!redisLock.tryLock(key, val, Duration.ofSeconds(10))) throw orderConflict();  // code 4090 + 冲突明细
     try {
         return orderTxService.createInTx(dto);   // ← 这个方法标 @Transactional，返回即已提交
     } finally {
@@ -644,6 +646,18 @@ public Long createOrder(OrderCreateDTO dto) {
 
 **前提 3：预检结果不可信，只是「省钱」，不是「安全」。**
 预检失败就直接拒（省一次锁 + 一次事务）；预检通过也只是**允许进入**加锁与事务，最终裁决权在唯一索引。三层任何一层被写成「if 判断了就返回成功」，都算 K2 失败。
+
+**前提 4：占用口径必须三处一致 —— `PENDING` 也算占用。**
+
+订单创建即 `PENDING` 并立刻写 `order_occupancy`（否则"待确认"期间同一时段还能被再下一单，K2 直接破）。因此凡是"这个物品这几天有没有被占"的查询，状态集合**必须**是 `('PENDING','CONFIRMED','IN_USE','OVERDUE')`，**只写三个已确认状态是 bug**：
+
+| 位置 | 必须一致的状态集合 |
+| :-- | :-- |
+| `OrderOccupancyMapper.xml` 的 `selectOccupiedDates`（下单冲突判定） | `PENDING, CONFIRMED, IN_USE, OVERDUE` |
+| `ItemMapper.xml` 的 `selectOccupiedItemIds` / `selectOccupiedDates`（列表 `available`、详情日历） | 同上（已实测踩过：漏 `PENDING` 会导致刚下单的物品仍显示"可租"） |
+
+`已完成 / 已取消` 的订单其占用行在状态流转时释放，不在集合内。
+
 
 #### 错误码口径：**锁失败不许漏成 5003**（K2 压测断言依赖此条）
 
@@ -890,3 +904,4 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-17 | 项目负责人 | **v1.12（记住密码与忘记密码落地）**：①§4.6 新增 **F15**——凭据只允许经 `utils/remember.js` 做 base64 混淆后进 `localStorage`，注释须写明「非加密」，密码/令牌禁止进日志与 URL，取消勾选或改密后必须清除；②§4.7 页面清单补「忘记密码 `/forgot`」（P0，与登录同档，用户进不去时要能从登录页一步到达）；③`POST /api/auth/reset-password` 的设计边界写进 `docs/接口文档.md` §1.9：**三种要素不匹配统一一句 2001 文案**（否则接口沦为账号探测器）、重置成功即作废该用户全部 refresh 令牌、以「知识校验」替代短信验证码（无通道，需求总结 §10）；④配套实绩：`ResetPasswordDTO` + `AuthServiceImpl.resetPassword`（`@Transactional`，只更新 `password_hash`，随后 `refreshTokenStore.remove`）+ `AuthController` 新端点 + `SecurityConfig` 放行；`AuthIntegrationTest` 3 例（改密后旧密码 1005 / 新密码可登录 / 旧 refresh 1003；三要素不匹配文案一致；未设社区账号跳过社区校验），测试总数 47 → **50/50**；前端新增 `utils/remember.js`、`views/auth/ForgotView.vue`、`LoginView` 的记住密码与忘记密码入口，`npm run build` 通过（含 `ForgotView` 独立分块）；⑤顺带修两处**测试自身缺陷**：`MapperIntegrationTest` 不再锁死 `user`/`user_role` 总行数（浏览器注册会合法地让条数增长，改为校验 4 个种子手机号存在 + 分页用下界断言）、`JwtUtilTest`/`JwtAuthenticationFilterTest` 的篡改用例改打**签名段首字符**（32 字节 HMAC 的 base64url 末字符含 2 个无关位，改末字符可能解码出相同签名 → 偶发假失败），并给过滤器测试补 `@BeforeEach` 清 `SecurityContextHolder`（Spring 测试残留登录态会污染它）；⑥口径变更已备案：需求总结 §14.1「找回密码：原不做 → 知识校验式重置」 |
 | 2026-11-17 | 项目负责人 | **v1.13（前端视觉基线定档）**：①新增 §4.9——风格定档「温暖亲切 / 主色暖橙 / 宽松舒适 12px 圆角」，并规定**唯一取值来源**（两端 `variables.scss` 的色/字/距/圆角、`global.scss` 的 `:root` EP 覆盖、`constants.js` 的六状态 `color`、`AuthLayout`/`DefaultLayout` 作为版式样板）；②硬规则六条——主色分三层（`#ea580c` 交互填充 3.6:1 / `#f97316` 仅图形不承载小字 / `#c2410c` 白底文字 5.2:1）、字号只五档间距只七档、状态色只从字典取、主题改动必须 build 后 grep `--el-color-primary` 自查、不做暗色/插画/动效库/自定义图标、视觉打磨每次 ≤1 天且不得挤占 K2/K3；③配套实绩：`web-user` 重写 `variables.scss`（暖橙 21 个颜色 token + 五档字号 + 七档间距 + 三档圆角 + 三档暖色阴影）与 `global.scss`（`:root` 覆盖 EP 含 `-light-3/5/7/8/9`/`-dark-2`），新增 `layout/AuthLayout.vue`（左右分栏 + 纯 CSS 光斑 + 三条硬指标展示，≤900px 上下堆叠），`LoginView`/`RegisterView`/`ForgotView` 统一套用，`DefaultLayout` 重做顶栏（logo 方块 + 导航下划线 + 吸顶毛玻璃），`constants.js` 三张状态字典加 `color` 字段；`web-admin` 新增 `variables.scss`（管理端更紧凑一套）与同族 `global.scss`；两端 `npm run build` 通过（用户端含 `AuthLayout`/各视图独立分块） |
 | 2026-11-18 | 项目负责人 | **v1.14（切片 2 前端落地 + 类目字典补契约）**：①§4.7 页面清单按实际交付校准——首页路由 `/home` → `/`、个人中心 `/profile` → `/mine`，并补两张「已交付 / 未交付」清单（路由与清单必须同步，改路由就改这行）；②新增 §4.6 **F16**——列表/详情/发布页要用的字典（类目、社区）只走公开字典接口，**禁止在前端写死类目名或小区名**，也禁止把字典塞进 `constants.js` 当"伪枚举"（字典是数据，会随管理端增删；枚举是契约，必须与后端逐字一致）；③配套实绩：后端补 `GET /api/categories`（`CategoryVO` + `CategoryService` + `CategoryController`，`SecurityConfig` 放行，`CategoryServiceTest` 1 例，测试总数 74 → **75/75**），并在 `docs/接口文档.md` 以 **CONTRACT CHANGE** 方式登记 §2.12（冻结 §2 时遗漏了发布/筛选都要用的类目数据源）；前端 `web-user` 新增 `api/item.js`、`api/category.js`、`components/ItemCard.vue`、`components/OccupancyCalendar.vue`、`views/item/{ItemListView,ItemDetailView,ItemPublishView,ItemMineView}.vue`，`HomeView` 的切片进度表换成真实物品卡片流 + 类目入口，`DefaultLayout` 补「逛物品 / 发布 / 我的物品」导航；`web-admin` 新增 `api/item.js`、`views/audit/AuditView.vue`（默认只看待审核、通过即上架、驳回必须写原因）、`constants.js` 补 `ITEM_STATUS`；两端 `npm run build` 通过；④联调实测 31 条断言全过（经 8081 实例 + 仓库内 `.g3_front.mjs`，脚本已删除）：字典 11/5 条、匿名列表 total 6、详情图集 2 张、日历占用 11-20/21/22、非法月份 2003、发布多图 → 驳回（审核意见透出）→ 编辑回待审且审核意见清空 → 通过 → 公开列表可搜 → 下架消失 → 删除，以及匿名 1001 / 普通用户访问管理端 1002 |
+| 2026-11-19 | 项目负责人 | **v1.15（切片 3 后端 K2 落地）**：①§8.3 新增「前提 4：占用口径必须三处一致——`PENDING` 也算占用」，并给出两张 XML 的状态集合对照表（`OrderOccupancyMapper.xml` 的冲突判定、`ItemMapper.xml` 的列表 `available` 与详情日历）；实测踩过：漏 `PENDING` 会让刚下单的物品仍显示"可租"；②§8.3 的示例代码里 `tryLock` 失败原写 `BizException(LOCK_ACQUIRE_FAILED)`，与本节的"错误码口径"自相矛盾，改为转 4090；③§4.1 目录树补 `common/lock/`（`RedisLock`）、`common/config` 实际成员（`TraceIdFilter`/`MybatisPlusConfig`/`JacksonConfig`/`WebMvcConfig`/`FileStorageProperties`）、`module/order` 的双 Service 分工（`OrderService` 加锁不标事务 / `OrderTxService` 标事务）、`resources/mapper` 两个 XML；④配套实绩：`OrderStatus`、`RedisLock`（SET NX PX + Lua 比对删除）、`OrderQuoteDTO`/`OrderCreateDTO`（**不含任何金额字段**，金额一律服务端重算）、`OrderQuoteVO`/`OrderCreatedVO`/`OrderDetailVO`、`OrderService`+`OrderTxService` 及其实现、`OrderController`（`POST /api/orders/quote`、`POST /api/orders`、`GET /api/orders/{id}`）、`OrderOccupancyMapper.selectOccupiedDates` + XML；`docs/接口文档.md` 新增 §3（切片 3 冻结：九条口径、4090 `suggestRanges` 生成规则、并发承诺）并登记 3005 与 3004 的语义分工；`OrderIntegrationTest` 13 例 + `OrderConcurrencyTest` 1 例（50 线程：成功 1 / 4090 49 / 无 5003、5000 / 占用 3 行无重复），测试总数 75 → **89/89**；G3 端到端 19 条断言全过（试算 3 天 75+100=175、下单 `R202611190001`、PENDING 也占日历、他人 4090 带 3 个 `conflictDates` 与 3 个互不重叠 `suggestRanges`、第三方看详情 3008、自租 3006、匿名 1001）；⑤口径备案：**创建即 PENDING 并立即占时段**（若等确认才占，待确认期间可重复下单，K2 破） |
