@@ -202,14 +202,20 @@ class ItemIntegrationTest {
     }
 
     @Test
-    @DisplayName("上下架：无进行中订单可以来回切（物品 3）")
+    @DisplayName("上下架：无进行中订单可以来回切（自建物品，不依赖种子状态）")
     void shelf_offThenOn_succeeds() {
+        // 不借种子物品：用户会在浏览器里真实下单/确认，种子物品随时可能"有进行中订单"（本次物品 3 就被确认了）
+        Long itemId = createPendingItem(3L, "李娜");
         loginAs(3L, "李娜", "USER");
-        itemService.shelf(3L, new ItemShelfDTO(false));
-        assertThat(itemMapper.selectById(3L).getStatus()).isEqualTo("OFF_SHELF");
+        itemMapper.update(null, Wrappers.<Item>lambdaUpdate()
+                .set(Item::getStatus, "ON_SHELF")
+                .eq(Item::getId, itemId));
 
-        itemService.shelf(3L, new ItemShelfDTO(true));
-        assertThat(itemMapper.selectById(3L).getStatus()).isEqualTo("ON_SHELF");
+        itemService.shelf(itemId, new ItemShelfDTO(false));
+        assertThat(itemMapper.selectById(itemId).getStatus()).isEqualTo("OFF_SHELF");
+
+        itemService.shelf(itemId, new ItemShelfDTO(true));
+        assertThat(itemMapper.selectById(itemId).getStatus()).isEqualTo("ON_SHELF");
     }
 
     // ---------------------------------------------------------------- 检索与日历

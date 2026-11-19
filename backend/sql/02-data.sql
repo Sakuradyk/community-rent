@@ -151,10 +151,13 @@ INSERT INTO `rental_order` (`id`, `order_no`, `item_id`, `owner_id`, `renter_id`
     NULL, NULL, NULL, '2026-11-16 20:00:00');
 
 -- 订单 2 的占用：11-20 ~ 11-23 半开区间 → 11-20 / 11-21 / 11-22 共 3 行
+-- 订单 3 是 PENDING（待确认），**同样占时段**：下单即占，否则待确认期间可被重复下单（K2）
 INSERT INTO `order_occupancy` (`item_id`, `order_id`, `occupy_date`) VALUES
 (2, 2, '2026-11-20'),
 (2, 2, '2026-11-21'),
-(2, 2, '2026-11-22');
+(2, 2, '2026-11-22'),
+(3, 3, '2026-11-25'),
+(3, 3, '2026-11-26');
 
 -- 订单 1 的结算：租金 75 + 押金 100，损耗 0.03（押金 × 0.0003），应退 99.97
 INSERT INTO `settlement` (`order_id`, `settle_no`, `rent_amount`, `deposit_amount`, `overdue_days`, `overdue_fee`,

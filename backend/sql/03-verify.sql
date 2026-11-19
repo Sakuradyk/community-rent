@@ -19,7 +19,7 @@ FROM (SELECT o.order_no
       FROM rental_order o
       LEFT JOIN (SELECT order_id, COUNT(*) AS c FROM order_occupancy GROUP BY order_id) x
              ON x.order_id = o.id
-      WHERE o.status IN ('CONFIRMED', 'IN_USE', 'OVERDUE')
+      WHERE o.status IN ('PENDING', 'CONFIRMED', 'IN_USE', 'OVERDUE')
         AND IFNULL(x.c, 0) <> o.rent_days) t;
 
 -- A3 终态订单（COMPLETED / CANCELLED）不得残留占用
@@ -28,11 +28,14 @@ FROM order_occupancy oc
 JOIN rental_order o ON o.id = oc.order_id
 WHERE o.status IN ('COMPLETED', 'CANCELLED');
 
--- A4 待确认订单（PENDING）不得有占用（状态机规定 PENDING 不占时段）
-SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A4_pending_no_occupancy`, COUNT(*) AS `actual`
-FROM order_occupancy oc
-JOIN rental_order o ON o.id = oc.order_id
-WHERE o.status = 'PENDING';
+-- A4 待确认订单（PENDING）**必须**有占用 —— 「下单即占时段」；
+--    若反过来要求 PENDING 不占，待确认期间同一时段能被重复下单，K2 直接破
+SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A4_pending_must_occupy`, COUNT(*) AS `actual`
+FROM rental_order o
+LEFT JOIN (SELECT order_id, COUNT(*) AS c FROM order_occupancy GROUP BY order_id) x
+       ON x.order_id = o.id
+WHERE o.status = 'PENDING'
+  AND IFNULL(x.c, 0) <> o.rent_days;
 
 -- A5 应退押金 = max(押金 − 逾期费 − 损耗费, 0)
 SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A5_refund_formula`, COUNT(*) AS `actual`

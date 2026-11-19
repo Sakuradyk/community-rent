@@ -273,7 +273,10 @@ CREATE TABLE `rental_order` (
 -- ⚠ 铁律：必须逐日展开（[start_date, end_date) 逐天一行）。若改成"一单一行存
 --   start_date/end_date"，则任意两笔订单的 (item_id, start_date) 天然不同，
 --   唯一索引永远不会触发，K2 第三层防线等于不存在。
--- 生命周期：CONFIRMED 时批量 INSERT，进入终态（COMPLETED / CANCELLED）时 DELETE。
+-- 生命周期：**建单（PENDING）时**即按 [start_date, end_date) 逐日 INSERT ——
+--   "下单即占时段"。若改成"确认后才占"或"一单一行"，待确认期间同一时段能被
+--   重复下单，唯一索引没机会触发，K2 直接破。进入终态（COMPLETED / CANCELLED）
+--   时 DELETE（取消/归还释放），中间 CONFIRMED / IN_USE / OVERDUE 一直保留。
 -- ---------------------------------------------------------------------------
 CREATE TABLE `order_occupancy` (
     `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
