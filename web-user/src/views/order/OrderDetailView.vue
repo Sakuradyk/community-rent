@@ -1,7 +1,8 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getOrder } from '@/api/order'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { cancelOrder, confirmOrder, getOrder, pickupOrder } from '@/api/order'
 import { useUserStore } from '@/stores/user'
 import { ORDER_STATUS, statusOf } from '@/utils/constants'
 import { formatDate, formatDateTime, formatMoney, resolveImageUrl } from '@/utils/format'
@@ -12,9 +13,19 @@ const userStore = useUserStore()
 
 const order = ref(null)
 const loading = ref(true)
+const acting = ref(false)
 const errorText = ref('')
 
 const statusMeta = (status) => statusOf(ORDER_STATUS, status)
+
+// 身份判断用字符串比较：后端把 Long 序列化成字符串，直接 === 数字永远不成立
+const isOwner = computed(() => String(order.value?.owner?.id) === String(userStore.profile?.id))
+const isRenter = computed(() => String(order.value?.renter?.id) === String(userStore.profile?.id))
+const canConfirm = computed(() => isOwner.value && order.value?.status === 'PENDING')
+const canPickup = computed(() => isOwner.value && order.value?.status === 'CONFIRMED')
+const canCancel = computed(
+  () => (isOwner.value || isRenter.value) && ['PENDING', 'CONFIRMED'].includes(order.value?.status),
+)
 
 async function load() {
   loading.value = true
@@ -26,6 +37,33 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+/** 三个动作的公共壳：按钮忙碌 → 调接口 → 提示 → 重新拉详情（状态与可点按钮都跟着变） */
+async function runAction(action, successText) {
+  acting.value = true
+  try {
+    await action()
+    ElMessage.success(successText)
+    await load()
+  } catch {
+    // 失败提示由 request.js 统一弹出（3001/3008 等），这里只负责恢复按钮
+  } finally {
+    acting.value = false
+  }
+}
+
+const onConfirm = () => runAction(() => confirmOrder(order.value.id), '已确认出租，等待对方取用')
+const onPickup = () => runAction(() => pickupOrder(order.value.id), '已标记取用，物品进入租出中')
+
+async function onCancel() {
+  const result = await ElMessageBox.prompt('取消后该时段会立即释放给其他人，可填写原因（留空则记「用户主动取消」）', '取消订单', {
+    confirmButtonText: '确认取消',
+    cancelButtonText: '再想想',
+    inputPlaceholder: '例如：临时不需要了',
+  }).catch(() => null)
+  if (!result) return
+  await runAction(() => cancelOrder(order.value.id, { reason: result.value || undefined }), '订单已取消，占用已释放')
 }
 
 onMounted(load)
@@ -85,7 +123,7 @@ onMounted(load)
             </el-descriptions-item>
           </el-descriptions>
           <p class="muted small">
-            状态流转（确认 / 取用 / 归还 / 取消）在切片 4 开放；当前订单只做「已占时段」这一件事。
+            状态流转：出租方「确认出租 → 标记取用」，双方都可在取用前取消；取用后只能走归还（切片 5 开放，含结算冷静期）。
           </p>
         </section>
       </div>
@@ -93,13 +131,18 @@ onMounted(load)
       <div class="footer-actions">
         <el-button @click="router.push({ name: 'orders' })">返回我的订单</el-button>
         <el-button
-          v-if="userStore.isLogin"
           type="primary"
           plain
           @click="router.push({ name: 'item-detail', params: { id: order.itemId } })"
         >
           查看物品
         </el-button>
+
+        <span class="spacer" />
+
+        <el-button v-if="canCancel" :loading="acting" @click="onCancel">取消订单</el-button>
+        <el-button v-if="canConfirm" type="primary" :loading="acting" @click="onConfirm">确认出租</el-button>
+        <el-button v-if="canPickup" type="primary" :loading="acting" @click="onPickup">标记已取用</el-button>
       </div>
     </template>
   </div>
@@ -174,7 +217,12 @@ onMounted(load)
 
 .footer-actions {
   display: flex;
+  align-items: center;
   gap: $space-3;
   margin-top: $space-6;
+}
+
+.spacer {
+  flex: 1;
 }
 </style>

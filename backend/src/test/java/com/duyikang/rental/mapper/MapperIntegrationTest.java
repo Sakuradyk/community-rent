@@ -100,8 +100,10 @@ class MapperIntegrationTest {
         // 同理：只数种子物品的图片（13 张），用户新发布的物品图片不计入
         assertThat(itemImageMapper.selectCount(new QueryWrapper<com.duyikang.rental.module.item.entity.ItemImage>()
                 .le("item_id", 7L))).isEqualTo(13L);
-        assertThat(rentalOrderMapper.selectCount(null)).isEqualTo(3L);
-        assertThat(orderOccupancyMapper.selectCount(null)).isEqualTo(3L);
+        // 订单与占用同样会随真实使用增长（用户在浏览器里下单），只校验「3 笔种子订单都在」
+        assertThat(rentalOrderMapper.selectCount(new QueryWrapper<com.duyikang.rental.module.order.entity.RentalOrder>()
+                .in("order_no", List.of("R202610050001", "R202611200001", "R202611250001")))).isEqualTo(3L);
+        assertThat(orderOccupancyMapper.selectCount(null)).isGreaterThanOrEqualTo(3L);
         assertThat(settlementMapper.selectCount(null)).isEqualTo(1L);
         assertThat(feeFlowMapper.selectCount(null)).isEqualTo(4L);
         assertThat(creditLogMapper.selectCount(null)).isEqualTo(2L);

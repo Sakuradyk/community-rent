@@ -29,3 +29,20 @@ export function getOrder(id) {
 export function listOrders(params) {
   return request.get('/orders', { params })
 }
+
+// ---------------------------------------------------------------- 切片 4：状态流转（契约 §4）
+
+/** 出租方确认出租：PENDING → CONFIRMED */
+export function confirmOrder(id) {
+  return request.post(`/orders/${id}/confirm`)
+}
+
+/** 出租方标记已取用：CONFIRMED → IN_USE */
+export function pickupOrder(id) {
+  return request.post(`/orders/${id}/pickup`)
+}
+
+/** 取消订单：PENDING / CONFIRMED → CANCELLED（后端会释放占用） */
+export function cancelOrder(id, data) {
+  return request.post(`/orders/${id}/cancel`, data)
+}

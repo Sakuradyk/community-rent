@@ -246,18 +246,27 @@ class ItemIntegrationTest {
     }
 
     @Test
-    @DisplayName("检索：按可租日期过滤时排除被占用的物品（物品 2 占用 11-20~11-22）")
+    @DisplayName("检索：按可租日期过滤时排除被占用的物品")
     void list_withDateRange_excludesOccupiedItem() {
         long onShelf = countOnShelf();
+        LocalDate start = LocalDate.parse("2026-11-20");
+        LocalDate end = LocalDate.parse("2026-11-23");
         ItemQuery query = new ItemQuery();
-        query.setStartDate(LocalDate.parse("2026-11-20"));
-        query.setEndDate(LocalDate.parse("2026-11-23"));
+        query.setStartDate(start);
+        query.setEndDate(end);
+
+        // 期望值从库里算，不写死：用户在浏览器下单会在该窗口里新增占用
+        List<Long> occupiedIds = itemMapper.selectOccupiedItemIds(start, end);
+        long occupiedOnShelf = occupiedIds.isEmpty() ? 0L
+                : itemMapper.selectBatchIds(occupiedIds).stream()
+                        .filter(i -> "ON_SHELF".equals(i.getStatus())).count();
 
         PageResult<ItemCardVO> page = itemService.list(query);
 
-        assertThat(page.getList()).extracting(ItemCardVO::id).doesNotContain(2L);
-        // 该窗口内只有物品 2 被占用，所以在架总数减 1；不写死数字，避免真实发布的数据把测试弄红
-        assertThat(page.getTotal()).isEqualTo(onShelf - 1);
+        if (!occupiedIds.isEmpty()) {
+            assertThat(page.getList()).extracting(ItemCardVO::id).doesNotContainAnyElementsOf(occupiedIds);
+        }
+        assertThat(page.getTotal()).isEqualTo(onShelf - occupiedOnShelf);
         assertThat(page.getList()).allSatisfy(card -> assertThat(card.available()).isTrue());
     }
 

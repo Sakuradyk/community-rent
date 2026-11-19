@@ -26,9 +26,13 @@
     <div class="block">
       <h3>逾期扫描</h3>
       <p class="muted">
-        答辩演示需要「立即执行逾期扫描」按钮：点一下就把到期未还的订单置为 OVERDUE，不用等定时任务。
+        答辩演示用的「立即执行逾期扫描」：点一下就把「已过归还日但仍使用中」的订单置为 OVERDUE，
+        不用等定时任务（定时任务读 <code>sys_config['order.scan.cron']</code>，两者调用同一个方法）。
       </p>
-      <el-button type="primary" disabled>立即执行逾期扫描（待接口：切片 4）</el-button>
+      <div class="scan-row">
+        <el-button type="primary" :loading="scanning" @click="runScan">立即执行逾期扫描</el-button>
+        <span v-if="scanText" class="muted">{{ scanText }}</span>
+      </div>
     </div>
 
     <div class="block">
@@ -56,8 +60,12 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { listAdminItems } from '@/api/item'
 import request from '@/api/request'
+
+const scanning = ref(false)
+const scanText = ref('')
 
 // 只有"已经有接口"的数字才照亮，其余保持「—」，绝不放假数据（项目进度.md §3.1）
 const cards = ref([
@@ -69,14 +77,29 @@ const cards = ref([
 
 const modules = [
   { name: '物品审核', desc: '待审核列表 + 通过/驳回（驳回必须写原因）+ 详情抽屉', slice: '切片 2', ready: true, to: '/audit' },
-  { name: '订单与逾期扫描', desc: '订单列表、状态筛选、立即执行逾期扫描', slice: '切片 4', ready: false, to: null },
+  { name: '订单与逾期扫描', desc: '状态流转已通（确认/取用/取消），管理端可立即执行逾期扫描', slice: '切片 4', ready: true, to: null },
   { name: '申诉处理', desc: '申诉列表、裁定、信誉回滚', slice: '切片 5', ready: false, to: null },
   { name: '参数配置', desc: '信誉/费用/损耗策略读写 + 立即生效刷新', slice: '切片 6', ready: false, to: null },
   { name: '数据看板', desc: 'ECharts 图表（需后端统计接口）', slice: '切片 6', ready: false, to: null }
 ]
 
-onMounted(async () => {
+/** 手动触发逾期扫描：与定时任务调用同一个后端方法，不存在两套逻辑 */
+async function runScan() {
+  scanning.value = true
   try {
+    const result = await request.post('/admin/orders/scan-overdue')
+    scanText.value = result.updated > 0
+      ? `本次 ${result.updated} 单转为「已逾期」（${result.scannedAt}）`
+      : `扫描完成：没有需要转换的订单（${result.scannedAt}）`
+    ElMessage.success(scanText.value)
+  } catch {
+    // 提示已由 request.js 统一弹出
+  } finally {
+    scanning.value = false
+  }
+}
+
+onMounted(async () => {  try {
     const pending = await listAdminItems({ status: 'PENDING', pageNum: 1, pageSize: 1 })
     cards.value[0].value = String(pending.total ?? 0)
     cards.value[0].ready = true
@@ -136,5 +159,11 @@ onMounted(async () => {
   border-radius: $radius-base;
   padding: $space-4;
   margin-top: $space-4;
+}
+.scan-row {
+  display: flex;
+  align-items: center;
+  gap: $space-3;
+  margin-top: $space-2;
 }
 </style>

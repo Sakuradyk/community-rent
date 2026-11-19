@@ -12,7 +12,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.15 · 2026-11-19 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
+> **版本**：v1.16 · 2026-11-19 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
 
 ---
 
@@ -146,7 +146,7 @@
 │   │   ├── module/
 │   │   │   ├── user/             ← 用户与权限（controller/service/mapper/entity/dto/vo）
 │   │   │   ├── item/             ← 物品
-│   │   │   ├── order/            ← 订单与冲突检测（K2）：OrderController / OrderService+Impl（加锁，无事务）/ OrderTxService+Impl（事务落库）
+│   │   │   ├── order/            ← 订单与冲突检测（K2）：OrderController / OrderService+Impl（加锁，无事务）/ OrderTxService+Impl（事务落库）/ OrderStateService+Impl（状态流转，CAS + 事务）
 │   │   │   ├── settlement/       ← 费用结算（K3）
 │   │   │   ├── credit/           ← 信誉分（K4）
 │   │   │   ├── recommend/        ← 推荐（K5）
@@ -154,8 +154,8 @@
 │   │   │   ├── appeal/           ← 申诉与纠纷
 │   │   │   ├── message/          ← 站内信
 │   │   │   └── system/           ← 系统支撑：配置参数（sys_config）与文件存储（上传/静态映射）
-│   │   ├── admin/                ← 管理端专用接口（controller 层）
-│   │   └── job/                  ← 定时任务（逾期扫描、结算补偿、推荐更新）
+│   │   ├── admin/                ← 管理端专用接口（controller 层）：AdminItemController / AdminOrderController（scan-overdue）
+│   │   └── job/                  ← 定时任务：OrderScanJob（cron 从 sys_config 读，且必须配管理端手动触发）
 │   │
 │   └── src/main/resources/       ← 注意：与 src/main/java 同级，不在 Java 包目录下
 │       ├── application.yml
@@ -698,6 +698,37 @@ public Long createOrder(OrderCreateDTO dto) {
 
 ---
 
+### 8.4 订单状态机规范（K2 的下游，K3/K4 的入口）
+
+**一、状态迁移一律用「条件更新」，不许「先查再改」。**
+
+```java
+// ✅ 一条 SQL 完成「检查 + 迁移」，并发下只有一个请求能成功
+int rows = rentalOrderMapper.update(null, Wrappers.<RentalOrder>lambdaUpdate()
+        .set(RentalOrder::getStatus, OrderStatus.CONFIRMED)
+        .set(RentalOrder::getConfirmedAt, LocalDateTime.now())
+        .eq(RentalOrder::getId, orderId)
+        .eq(RentalOrder::getStatus, OrderStatus.PENDING));
+
+// ❌ 先 selectById 判断、再 updateById —— 两次点击并发时会双写时间戳与状态
+```
+
+| 规定 | 内容 |
+| :-- | :-- |
+| 失败错误码 | 受影响行数 `0` → **`ORDER_STATE_INVALID`（3001）**，文案必须说明「需要什么状态、当前是什么状态」。**绝不许**用 `ITEM_STATUS_INVALID`（3003，那是「物品不可租」） |
+| 状态迁移放哪 | 独立 Service（`OrderStateService`）+ `@Transactional`。`OrderServiceImpl`（加锁那层）**不许**标 `@Transactional` |
+| 谁释放占用 | 只有 **取消（cancel）** 与 **归还（return）** 删 `order_occupancy`；确认/取用/逾期扫描一律不动占用 |
+| 物品状态联动 | `pickup` → 物品 `RENTED`；`cancel` → 物品从 `RENTED` 回 `ON_SHELF`（只在无其它进行中订单时） |
+| 幂等 | 重复点击靠状态条件天然幂等：第二次 `rows=0` → 3001，不会双写、不会重复扣分 |
+| 定时任务 | cron **从 `sys_config` 读**（缺失/非法回退默认值并 warn）；`runOnce()` 必须 catch 全部异常（一次失败不许让任务停摆）；**必须同时提供管理端手动触发接口**，且两者调用同一个方法 |
+
+**二、写状态机测试时注意两个坑**
+
+1. 物品一旦 `RENTED` 就不能再下单 —— 测「取消释放占用后别人能重新下单」时，**必须换一件物品**，否则拿到的是 3003 而不是预期的 2001/4090。
+2. `SchedulingConfigurer` 的 `CronTrigger.nextExecution(...)` 返回 `Instant`，不要再包一层 `LocalDateTime`。
+
+---
+
 ## 9. 配置外置规范（**不许硬编码**）
 
 以下数值**必须**从配置表或 `application.yml` 读取，**禁止**在 Java 代码里出现字面量：
@@ -905,3 +936,4 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-17 | 项目负责人 | **v1.13（前端视觉基线定档）**：①新增 §4.9——风格定档「温暖亲切 / 主色暖橙 / 宽松舒适 12px 圆角」，并规定**唯一取值来源**（两端 `variables.scss` 的色/字/距/圆角、`global.scss` 的 `:root` EP 覆盖、`constants.js` 的六状态 `color`、`AuthLayout`/`DefaultLayout` 作为版式样板）；②硬规则六条——主色分三层（`#ea580c` 交互填充 3.6:1 / `#f97316` 仅图形不承载小字 / `#c2410c` 白底文字 5.2:1）、字号只五档间距只七档、状态色只从字典取、主题改动必须 build 后 grep `--el-color-primary` 自查、不做暗色/插画/动效库/自定义图标、视觉打磨每次 ≤1 天且不得挤占 K2/K3；③配套实绩：`web-user` 重写 `variables.scss`（暖橙 21 个颜色 token + 五档字号 + 七档间距 + 三档圆角 + 三档暖色阴影）与 `global.scss`（`:root` 覆盖 EP 含 `-light-3/5/7/8/9`/`-dark-2`），新增 `layout/AuthLayout.vue`（左右分栏 + 纯 CSS 光斑 + 三条硬指标展示，≤900px 上下堆叠），`LoginView`/`RegisterView`/`ForgotView` 统一套用，`DefaultLayout` 重做顶栏（logo 方块 + 导航下划线 + 吸顶毛玻璃），`constants.js` 三张状态字典加 `color` 字段；`web-admin` 新增 `variables.scss`（管理端更紧凑一套）与同族 `global.scss`；两端 `npm run build` 通过（用户端含 `AuthLayout`/各视图独立分块） |
 | 2026-11-18 | 项目负责人 | **v1.14（切片 2 前端落地 + 类目字典补契约）**：①§4.7 页面清单按实际交付校准——首页路由 `/home` → `/`、个人中心 `/profile` → `/mine`，并补两张「已交付 / 未交付」清单（路由与清单必须同步，改路由就改这行）；②新增 §4.6 **F16**——列表/详情/发布页要用的字典（类目、社区）只走公开字典接口，**禁止在前端写死类目名或小区名**，也禁止把字典塞进 `constants.js` 当"伪枚举"（字典是数据，会随管理端增删；枚举是契约，必须与后端逐字一致）；③配套实绩：后端补 `GET /api/categories`（`CategoryVO` + `CategoryService` + `CategoryController`，`SecurityConfig` 放行，`CategoryServiceTest` 1 例，测试总数 74 → **75/75**），并在 `docs/接口文档.md` 以 **CONTRACT CHANGE** 方式登记 §2.12（冻结 §2 时遗漏了发布/筛选都要用的类目数据源）；前端 `web-user` 新增 `api/item.js`、`api/category.js`、`components/ItemCard.vue`、`components/OccupancyCalendar.vue`、`views/item/{ItemListView,ItemDetailView,ItemPublishView,ItemMineView}.vue`，`HomeView` 的切片进度表换成真实物品卡片流 + 类目入口，`DefaultLayout` 补「逛物品 / 发布 / 我的物品」导航；`web-admin` 新增 `api/item.js`、`views/audit/AuditView.vue`（默认只看待审核、通过即上架、驳回必须写原因）、`constants.js` 补 `ITEM_STATUS`；两端 `npm run build` 通过；④联调实测 31 条断言全过（经 8081 实例 + 仓库内 `.g3_front.mjs`，脚本已删除）：字典 11/5 条、匿名列表 total 6、详情图集 2 张、日历占用 11-20/21/22、非法月份 2003、发布多图 → 驳回（审核意见透出）→ 编辑回待审且审核意见清空 → 通过 → 公开列表可搜 → 下架消失 → 删除，以及匿名 1001 / 普通用户访问管理端 1002 |
 | 2026-11-19 | 项目负责人 | **v1.15（切片 3 后端 K2 落地）**：①§8.3 新增「前提 4：占用口径必须三处一致——`PENDING` 也算占用」，并给出两张 XML 的状态集合对照表（`OrderOccupancyMapper.xml` 的冲突判定、`ItemMapper.xml` 的列表 `available` 与详情日历）；实测踩过：漏 `PENDING` 会让刚下单的物品仍显示"可租"；②§8.3 的示例代码里 `tryLock` 失败原写 `BizException(LOCK_ACQUIRE_FAILED)`，与本节的"错误码口径"自相矛盾，改为转 4090；③§4.1 目录树补 `common/lock/`（`RedisLock`）、`common/config` 实际成员（`TraceIdFilter`/`MybatisPlusConfig`/`JacksonConfig`/`WebMvcConfig`/`FileStorageProperties`）、`module/order` 的双 Service 分工（`OrderService` 加锁不标事务 / `OrderTxService` 标事务）、`resources/mapper` 两个 XML；④配套实绩：`OrderStatus`、`RedisLock`（SET NX PX + Lua 比对删除）、`OrderQuoteDTO`/`OrderCreateDTO`（**不含任何金额字段**，金额一律服务端重算）、`OrderQuoteVO`/`OrderCreatedVO`/`OrderDetailVO`、`OrderService`+`OrderTxService` 及其实现、`OrderController`（`POST /api/orders/quote`、`POST /api/orders`、`GET /api/orders/{id}`）、`OrderOccupancyMapper.selectOccupiedDates` + XML；`docs/接口文档.md` 新增 §3（切片 3 冻结：九条口径、4090 `suggestRanges` 生成规则、并发承诺）并登记 3005 与 3004 的语义分工；`OrderIntegrationTest` 13 例 + `OrderConcurrencyTest` 1 例（50 线程：成功 1 / 4090 49 / 无 5003、5000 / 占用 3 行无重复），测试总数 75 → **89/89**；G3 端到端 19 条断言全过（试算 3 天 75+100=175、下单 `R202611190001`、PENDING 也占日历、他人 4090 带 3 个 `conflictDates` 与 3 个互不重叠 `suggestRanges`、第三方看详情 3008、自租 3006、匿名 1001）；⑤口径备案：**创建即 PENDING 并立即占时段**（若等确认才占，待确认期间可重复下单，K2 破） |
+| 2026-11-19 | 项目负责人 | **v1.16（切片 4 订单状态流转）**：①新增 **§8.4 订单状态机规范**：状态迁移一律条件更新（`UPDATE ... WHERE id=? AND status=<旧态>`），受影响行数 0 → **3001 `ORDER_STATE_INVALID`**（绝不许用 3003，那是"物品不可租"）；状态迁移放独立 `OrderStateService` + `@Transactional`，`OrderServiceImpl`（加锁层）不标事务；**只有 cancel 与 return 释放 `order_occupancy`**，确认/取用/逾期扫描不动占用；`pickup` → 物品 `RENTED`、`cancel` → 回 `ON_SHELF`；定时任务 cron 从 `sys_config` 读（缺失回退并 warn）、`runOnce()` 必须吞异常、**必须提供管理端手动触发且与定时任务同一方法**；附两个测试坑（物品 `RENTED` 时不能下单，测取消释放占用要换物品；`CronTrigger.nextExecution` 返回 `Instant`）；②§4.1 目录树补 `OrderStateService+Impl`、`admin/` 的 `AdminOrderController`、`job/OrderScanJob`；③配套实绩：`OrderCancelDTO`、`OrderStateService`+`OrderStateServiceImpl`（`confirm`/`pickup`/`cancel`/`scanOverdue`、`requireChanged` 拼"需要旧态、当前现态"文案）、`ScanResultVO`、`AdminOrderController`（`POST /api/admin/orders/scan-overdue`）、`OrderController` 三个动作接口、`job/OrderScanJob`（`SchedulingConfigurer` + `CronTrigger`）；`docs/接口文档.md` 新增 §4（切片 4 冻结 4 接口 + §4.6 先写清切片 5 的归还与结算冷静期口径），原 §4/§5 降为 §5/§6，接口总数 24 → 28；`OrderStateIntegrationTest` 8 例，测试总数 93 → **101/101**；G3 18 条断言全过（承租方确认 3008、出租方三连动作、取用后取消 3001、租出中物品他人下单 3003、取消后日历释放、`scan-overdue` 返回 `{updated:1}` 且普通用户 1002）；④两处既有测试因用户真实下单变红，按"不改数据只改断言"修：`MapperIntegrationTest` 订单改按种子 `order_no` 计 3、占用改 `>= 3`；`ItemIntegrationTest` 日期筛选期望值改为「在架数 − 该窗口被占的在架数」；⑤口径备案：**结算冷静期（B 方案）**——归还生成 `settlement.status=PENDING_CONFIRM`，承租方 48h 内无异议转 `SETTLED`、提异议转 `DISPUTED` 并建 `appeal`、超时自动 `SETTLED`、管理端裁决转 `ADJUSTED`（窗口读 `sys_config` 的 `settlement.confirm.hours`），这是承租方对"出租方单方认定损耗"的对价手段 |
