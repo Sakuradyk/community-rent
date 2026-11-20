@@ -37,7 +37,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -64,6 +66,13 @@ public class SettlementServiceImpl implements SettlementService {
 
     private static final long DEFAULT_CONFIRM_HOURS = 48L;
 
+    /**
+     * 承租方发起归还申请后，出租方确认的超时窗口（小时）。
+     */
+    private static final String RETURN_HOURS_KEY = "order.return.confirm.hours";
+
+    private static final long DEFAULT_RETURN_HOURS = 24L;
+
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("yyyyMMdd");
 
     private final RentalOrderMapper rentalOrderMapper;
@@ -88,6 +97,12 @@ public class SettlementServiceImpl implements SettlementService {
 
     private final SysConfigMapper sysConfigMapper;
 
+    /**
+     * 归还申请超时扫描需要"每单一个独立事务"：一单失败不能把其他单一起回滚，
+     * 所以这里用编程式事务（TransactionTemplate），而不是在方法上挂 @Transactional。
+     */
+    private final PlatformTransactionManager transactionManager;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public SettlementDetailVO returnItem(Long orderId, OrderReturnDTO dto) {
@@ -96,15 +111,83 @@ public class SettlementServiceImpl implements SettlementService {
         if (!Objects.equals(order.getOwnerId(), user.userId())) {
             throw new BizException(ErrorCode.PERMISSION_DENIED_FOR_RESOURCE, "只有出租方可以标记归还");
         }
-        if (!OrderStatus.IN_USE.equals(order.getStatus()) && !OrderStatus.OVERDUE.equals(order.getStatus())) {
-            throw new BizException(ErrorCode.ORDER_STATE_INVALID,
-                    "无法归还：需要订单处于「使用中」或「已逾期」，当前是「" + OrderStatus.labelOf(order.getStatus()) + "」");
+        requireReturnableStatus(order);
+        requireValidReturnState(dto.returnState());
+        // 出租方验收的状态为准；承租方若发起过申请，时间戳保留作为"谁先说还了"的证据
+        return doSettle(order, dto.returnState(), dto.remark());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void requestReturn(Long orderId, OrderReturnDTO dto) {
+        LoginUser user = CurrentUser.require();
+        RentalOrder order = requireOrder(orderId);
+        if (!Objects.equals(order.getRenterId(), user.userId())) {
+            throw new BizException(ErrorCode.PERMISSION_DENIED_FOR_RESOURCE, "只有承租方可以发起归还申请");
         }
-        if (!ReturnState.isValid(dto.returnState())) {
-            throw new BizException(ErrorCode.PARAM_ERROR, "归还状态只能是：完好 / 轻微磨损 / 损坏");
-        }
+        requireReturnableStatus(order);
+        requireValidReturnState(dto.returnState());
         long settled = settlementMapper.selectCount(Wrappers.<Settlement>lambdaQuery()
                 .eq(Settlement::getOrderId, orderId));
+        if (settled > 0) {
+            throw new BizException(ErrorCode.SETTLEMENT_ALREADY_DONE);
+        }
+        if (order.getReturnRequestedAt() != null) {
+            throw new BizException(ErrorCode.ORDER_STATE_INVALID,
+                    "已提交过归还申请（" + order.getReturnRequestedAt() + "），请等待出租方确认");
+        }
+        RentalOrder patch = new RentalOrder();
+        patch.setId(order.getId());
+        patch.setReturnRequestedAt(LocalDateTime.now());
+        patch.setReturnRequestedBy("RENTER");
+        patch.setReturnRequestedState(dto.returnState());
+        if (dto.remark() != null && !dto.remark().isBlank()) {
+            patch.setRemark(dto.remark());
+        }
+        // 状态保持 IN_USE / OVERDUE：物品还在承租方手上，不能提前释放占用
+        rentalOrderMapper.updateById(patch);
+        log.info("订单 {} 承租方发起归还申请（申报状态 {}），出租方需在 {} 小时内确认",
+                order.getOrderNo(), dto.returnState(), returnConfirmHours());
+    }
+
+    @Override
+    public int scanReturnTimeout() {
+        long hours = returnConfirmHours();
+        LocalDateTime deadline = LocalDateTime.now().minusHours(hours);
+        List<RentalOrder> stale = rentalOrderMapper.selectList(Wrappers.<RentalOrder>lambdaQuery()
+                .in(RentalOrder::getStatus, List.of(OrderStatus.IN_USE, OrderStatus.OVERDUE))
+                .isNotNull(RentalOrder::getReturnRequestedAt)
+                .lt(RentalOrder::getReturnRequestedAt, deadline));
+        if (stale.isEmpty()) {
+            return 0;
+        }
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        int done = 0;
+        for (RentalOrder order : stale) {
+            String state = ReturnState.isValid(order.getReturnRequestedState())
+                    ? order.getReturnRequestedState() : ReturnState.INTACT;
+            try {
+                // 每单一个独立事务：一单失败不影响其他单，也不会留下"完成但没结算"的半成品
+                tx.executeWithoutResult(status ->
+                        doSettle(order, state, "出租方超时未确认归还，按承租方申报自动结算"));
+                done++;
+            } catch (RuntimeException e) {
+                log.warn("归还申请超时自动结算失败，orderId={}：{}", order.getId(), e.getMessage());
+            }
+        }
+        log.info("归还申请超时扫描：{} 单候选，{} 单自动结算（窗口 {} 小时）", stale.size(), done, hours);
+        return done;
+    }
+
+    /**
+     * 真正干活的那一段：算钱 → 落结算单 → 写流水 → 订单收尾 → 释放占用 → 信誉落账。
+     *
+     * <p>刻意不带任何权限判断（调用方各自校验），这样出租方确认与超时自动结算可以复用同一段逻辑，
+     * 避免两处各算一遍金额。</p>
+     */
+    private SettlementDetailVO doSettle(RentalOrder order, String returnState, String remark) {
+        long settled = settlementMapper.selectCount(Wrappers.<Settlement>lambdaQuery()
+                .eq(Settlement::getOrderId, order.getId()));
         if (settled > 0) {
             throw new BizException(ErrorCode.SETTLEMENT_ALREADY_DONE);
         }
@@ -123,7 +206,7 @@ public class SettlementServiceImpl implements SettlementService {
         BigDecimal overdueFee = FeeCalculator.overdueFee(order, overdueDays, feePolicy);
 
         // 损耗核算会写回 item.loss_value 与 item.status（在架 / 检修中）
-        LossService.LossResult loss = lossService.apply(item, order, dto.returnState());
+        LossService.LossResult loss = lossService.apply(item, order, returnState);
         BigDecimal refund = FeeCalculator.refund(order.getDeposit(), overdueFee, loss.lossFee());
 
         LocalDateTime now = LocalDateTime.now();
@@ -139,7 +222,7 @@ public class SettlementServiceImpl implements SettlementService {
         settlement.setRefundDeposit(refund);
         settlement.setStatus(SettlementStatus.PENDING_CONFIRM);
         settlement.setConfirmDeadline(now.plusHours(confirmHours()));
-        settlement.setRemark(dto.remark());
+        settlement.setRemark(remark);
         settlement.setCreatedAt(now);
         try {
             settlementMapper.insert(settlement);
@@ -162,11 +245,11 @@ public class SettlementServiceImpl implements SettlementService {
         orderOccupancyMapper.delete(Wrappers.<OrderOccupancy>lambdaQuery()
                 .eq(OrderOccupancy::getOrderId, order.getId()));
 
-        applyCredit(order, overdueDays, dto.returnState());
+        applyCredit(order, overdueDays, returnState);
 
         log.info("订单 {} 归还完成：逾期 {} 天，逾期费 {}，损耗值 {}，损耗费 {}，应退 {}",
                 order.getOrderNo(), overdueDays, overdueFee, loss.weight(), loss.lossFee(), refund);
-        return buildDetail(settlement, order, dto.returnState(),
+        return buildDetail(settlement, order, returnState,
                 loss.lossBefore(), loss.lossAfter(), loss.action());
     }
 
@@ -224,7 +307,8 @@ public class SettlementServiceImpl implements SettlementService {
     public void dispute(Long settlementId, SettlementDisputeDTO dto) {
         Settlement settlement = requireSettlement(settlementId);
         RentalOrder order = requireOrder(settlement.getOrderId());
-        requireRenter(order);
+        // 双方都能提异议：出租方在"承租方申请、超时自动结算"这条路径上也需要申诉入口
+        requireParty(order);
         if (!SettlementStatus.PENDING_CONFIRM.equals(settlement.getStatus())) {
             throw new BizException(ErrorCode.SETTLEMENT_ALREADY_DONE, "结算单当前状态是「"
                     + SettlementStatus.labelOf(settlement.getStatus()) + "」，不能再提异议");
@@ -238,14 +322,15 @@ public class SettlementServiceImpl implements SettlementService {
 
         Appeal appeal = new Appeal();
         appeal.setOrderId(order.getId());
-        appeal.setApplicantId(order.getRenterId());
+        appeal.setApplicantId(CurrentUser.requireId());
         appeal.setReason(dto.reason());
         appeal.setEvidenceUrls(joinEvidence(dto.evidenceUrls()));
         appeal.setStatus("PENDING");
         appeal.setCreatedAt(now);
         appeal.setUpdateTime(now);
         appealMapper.insert(appeal);
-        log.info("结算单 {} 被承租方提出异议，已生成申诉 appealId={}", settlement.getSettleNo(), appeal.getId());
+        log.info("结算单 {} 被提出异议（申请人 userId={}），已生成申诉 appealId={}",
+                settlement.getSettleNo(), appeal.getApplicantId(), appeal.getId());
     }
 
     @Override
@@ -289,7 +374,37 @@ public class SettlementServiceImpl implements SettlementService {
     private void requireRenter(RentalOrder order) {
         LoginUser user = CurrentUser.require();
         if (!Objects.equals(order.getRenterId(), user.userId())) {
-            throw new BizException(ErrorCode.PERMISSION_DENIED_FOR_RESOURCE, "只有承租方可以确认或对结算单提出异议");
+            throw new BizException(ErrorCode.PERMISSION_DENIED_FOR_RESOURCE, "只有承租方可以确认结算单");
+        }
+    }
+
+    /**
+     * 订单双方（承租方或出租方）之一，用于"提异议"：
+     * 出租方在归还申请超时被自动结算后，也需要有地方申诉。
+     */
+    private void requireParty(RentalOrder order) {
+        LoginUser user = CurrentUser.require();
+        if (!Objects.equals(order.getRenterId(), user.userId())
+                && !Objects.equals(order.getOwnerId(), user.userId())
+                && !CurrentUser.isAdmin()) {
+            throw new BizException(ErrorCode.PERMISSION_DENIED_FOR_RESOURCE, "只有订单双方可以提异议");
+        }
+    }
+
+    /**
+     * 归还前置状态：只有「使用中 / 已逾期」才能归还（或发起归还申请）。
+     */
+    private void requireReturnableStatus(RentalOrder order) {
+        if (!OrderStatus.IN_USE.equals(order.getStatus()) && !OrderStatus.OVERDUE.equals(order.getStatus())) {
+            throw new BizException(ErrorCode.ORDER_STATE_INVALID,
+                    "无法归还：需要订单处于「使用中」或「已逾期」，当前是「"
+                            + OrderStatus.labelOf(order.getStatus()) + "」");
+        }
+    }
+
+    private void requireValidReturnState(String returnState) {
+        if (!ReturnState.isValid(returnState)) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "归还状态只能是：完好 / 轻微磨损 / 损坏");
         }
     }
 
@@ -370,6 +485,23 @@ public class SettlementServiceImpl implements SettlementService {
         }
     }
 
+    /**
+     * 归还申请的超时窗口（小时）：读 `sys_config[order.return.confirm.hours]`，缺失或脏数据回退 24。
+     */
+    private long returnConfirmHours() {
+        SysConfig config = sysConfigMapper.selectOne(
+                Wrappers.<SysConfig>lambdaQuery().eq(SysConfig::getConfigKey, RETURN_HOURS_KEY));
+        if (config == null || config.getConfigValue() == null) {
+            return DEFAULT_RETURN_HOURS;
+        }
+        try {
+            return Long.parseLong(config.getConfigValue().trim());
+        } catch (NumberFormatException e) {
+            log.warn("{} 配置不是整数（{}），回退默认 {} 小时", RETURN_HOURS_KEY, config.getConfigValue(), DEFAULT_RETURN_HOURS);
+            return DEFAULT_RETURN_HOURS;
+        }
+    }
+
     private String joinEvidence(List<String> urls) {
         if (urls == null || urls.isEmpty()) {
             return null;
@@ -382,6 +514,7 @@ public class SettlementServiceImpl implements SettlementService {
                                           BigDecimal lossBefore, BigDecimal lossAfter, String action) {
         LoginUser user = CurrentUser.optional().orElse(null);
         boolean isRenter = user != null && Objects.equals(order.getRenterId(), user.userId());
+        boolean isParty = user != null && (isRenter || Objects.equals(order.getOwnerId(), user.userId()));
         boolean withinWindow = settlement.getConfirmDeadline() == null
                 || LocalDateTime.now().isBefore(settlement.getConfirmDeadline());
         boolean pending = SettlementStatus.PENDING_CONFIRM.equals(settlement.getStatus());
@@ -391,7 +524,9 @@ public class SettlementServiceImpl implements SettlementService {
                 .stream()
                 .map(f -> new SettlementDetailVO.FlowVO(f.getType(), f.getDirection(), f.getAmount(), f.getRemark()))
                 .toList();
-        boolean actionable = isRenter && pending && withinWindow;
+        // 确认只留给承租方（出租方点确认等于自己给自己背书）；提异议双方都可以
+        boolean canConfirm = isRenter && pending && withinWindow;
+        boolean canDispute = isParty && pending && withinWindow;
         return new SettlementDetailVO(
                 settlement.getId(), settlement.getOrderId(), settlement.getSettleNo(),
                 settlement.getRentAmount(), settlement.getDepositAmount(), settlement.getOverdueDays(),
@@ -399,7 +534,7 @@ public class SettlementServiceImpl implements SettlementService {
                 settlement.getRefundDeposit(), settlement.getStatus(), SettlementStatus.labelOf(settlement.getStatus()),
                 settlement.getConfirmDeadline(), settlement.getConfirmedAt(), settlement.getDisputedAt(),
                 settlement.getSettledAt(), settlement.getRemark(), settlement.getCreatedAt(),
-                actionable, actionable,
+                canConfirm, canDispute,
                 lossBefore, lossAfter, returnState, action,
                 flows);
     }

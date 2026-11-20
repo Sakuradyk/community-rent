@@ -332,6 +332,124 @@ class SettlementIntegrationTest {
                         e -> assertThat(e.getCode()).isEqualTo(ErrorCode.APPEAL_STATE_INVALID.getCode()));
     }
 
+    // ------------------------------------------------------------------ 方案 B：承租方发起归还申请
+
+    @Test
+    @DisplayName("归还申请：承租方登记申报状态，订单仍在使用中、占用不释放、不生成结算单")
+    void requestReturn_byRenter_recordsTimestampAndKeepsState() {
+        Long itemId = seedItem(OWNER, BigDecimal.ZERO);
+        Long orderId = seedOrder(itemId, "IN_USE", LocalDate.now().minusDays(1), LocalDate.now().plusDays(2));
+
+        loginAs(RENTER, "李娜", "USER");
+        settlementService.requestReturn(orderId, new OrderReturnDTO("WORN", "有点磨损"));
+
+        RentalOrder order = rentalOrderMapper.selectById(orderId);
+        assertThat(order.getStatus()).isEqualTo("IN_USE");
+        assertThat(order.getReturnRequestedAt()).isNotNull();
+        assertThat(order.getReturnRequestedBy()).isEqualTo("RENTER");
+        assertThat(order.getReturnRequestedState()).isEqualTo("WORN");
+        assertThat(order.getRemark()).isEqualTo("有点磨损");
+        // 物品还在承租方手上：占用不能提前释放
+        assertThat(occupancyRows(orderId)).isPositive();
+        assertThat(settlementMapper.selectCount(Wrappers.<Settlement>lambdaQuery()
+                .eq(Settlement::getOrderId, orderId))).isZero();
+    }
+
+    @Test
+    @DisplayName("归还申请：出租方发起 → 3008")
+    void requestReturn_byOwner_forbidden() {
+        Long itemId = seedItem(OWNER, BigDecimal.ZERO);
+        Long orderId = seedOrder(itemId, "IN_USE", LocalDate.now().minusDays(1), LocalDate.now().plusDays(2));
+
+        loginAs(OWNER, "张伟", "USER");
+        assertThatThrownBy(() -> settlementService.requestReturn(orderId, new OrderReturnDTO("INTACT", null)))
+                .isInstanceOfSatisfying(BizException.class,
+                        e -> assertThat(e.getCode()).isEqualTo(ErrorCode.PERMISSION_DENIED_FOR_RESOURCE.getCode()));
+    }
+
+    @Test
+    @DisplayName("归还申请：重复发起 → 3001")
+    void requestReturn_twice_stateInvalid() {
+        Long itemId = seedItem(OWNER, BigDecimal.ZERO);
+        Long orderId = seedOrder(itemId, "IN_USE", LocalDate.now().minusDays(1), LocalDate.now().plusDays(2));
+
+        loginAs(RENTER, "李娜", "USER");
+        settlementService.requestReturn(orderId, new OrderReturnDTO("INTACT", null));
+        assertThatThrownBy(() -> settlementService.requestReturn(orderId, new OrderReturnDTO("INTACT", null)))
+                .isInstanceOfSatisfying(BizException.class,
+                        e -> assertThat(e.getCode()).isEqualTo(ErrorCode.ORDER_STATE_INVALID.getCode()));
+    }
+
+    @Test
+    @DisplayName("归还申请后出租方验收：以出租方确认的状态为准（覆盖申报值）")
+    void confirmAfterRequest_usesOwnerState() {
+        Long itemId = seedItem(OWNER, BigDecimal.ZERO);
+        Long orderId = seedOrder(itemId, "IN_USE", LocalDate.now().minusDays(1), LocalDate.now().plusDays(2));
+
+        loginAs(RENTER, "李娜", "USER");
+        settlementService.requestReturn(orderId, new OrderReturnDTO("DAMAGED", "我觉得摔了一下"));
+
+        loginAs(OWNER, "张伟", "USER");
+        SettlementDetailVO vo = settlementService.returnItem(orderId, new OrderReturnDTO("INTACT", "验收完好"));
+
+        // 完好：0.0100 × 0.0250 × 1.0 = 0.00025 → 0.0003
+        assertThat(vo.lossRatio()).isEqualByComparingTo("0.0003");
+        assertThat(vo.lossFee()).isEqualByComparingTo("0.03");
+        assertThat(vo.remark()).isEqualTo("验收完好");
+        assertThat(rentalOrderMapper.selectById(orderId).getStatus()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    @DisplayName("归还申请超时：出租方不确认 → 按承租方申报状态自动结算")
+    void scanReturnTimeout_autoSettlesWithRenterState() {
+        Long itemId = seedItem(OWNER, BigDecimal.ZERO);
+        Long orderId = seedOrder(itemId, "IN_USE", LocalDate.now().minusDays(1), LocalDate.now().plusDays(2));
+
+        loginAs(RENTER, "李娜", "USER");
+        settlementService.requestReturn(orderId, new OrderReturnDTO("WORN", "已经还回去了"));
+        // 把申请时间改到 25 小时前（窗口默认 24 小时）—— 只能改时间，不改状态
+        RentalOrder patch = new RentalOrder();
+        patch.setId(orderId);
+        patch.setReturnRequestedAt(LocalDateTime.now().minusHours(25));
+        rentalOrderMapper.updateById(patch);
+
+        int updated = settlementService.scanReturnTimeout();
+        assertThat(updated).isEqualTo(1);
+
+        RentalOrder order = rentalOrderMapper.selectById(orderId);
+        assertThat(order.getStatus()).isEqualTo("COMPLETED");
+        assertThat(occupancyRows(orderId)).isZero();
+
+        Settlement settlement = settlementMapper.selectOne(Wrappers.<Settlement>lambdaQuery()
+                .eq(Settlement::getOrderId, orderId));
+        assertThat(settlement).isNotNull();
+        assertThat(settlement.getStatus()).isEqualTo("PENDING_CONFIRM");
+        assertThat(settlement.getConfirmDeadline()).isNotNull();
+        // 按承租方申报的 WORN：0.0100 × 0.0250 × 1.5 = 0.000375 → 0.0004，损耗费 0.04
+        assertThat(settlement.getLossRatio()).isEqualByComparingTo("0.0004");
+        assertThat(settlement.getLossFee()).isEqualByComparingTo("0.04");
+        assertThat(settlement.getRemark()).contains("超时");
+    }
+
+    @Test
+    @DisplayName("异议：出租方也能提（超时自动结算后需要有申诉入口）")
+    void dispute_byOwner_allowed() {
+        Long itemId = seedItem(OWNER, BigDecimal.ZERO);
+        Long orderId = seedOrder(itemId, "IN_USE", LocalDate.now().minusDays(1), LocalDate.now().plusDays(2));
+
+        loginAs(OWNER, "张伟", "USER");
+        SettlementDetailVO vo = settlementService.returnItem(orderId, new OrderReturnDTO("INTACT", null));
+
+        settlementService.dispute(vo.id(), new SettlementDisputeDTO("承租方申报的损耗不认可", null));
+
+        Settlement settlement = settlementMapper.selectById(vo.id());
+        assertThat(settlement.getStatus()).isEqualTo("DISPUTED");
+        Appeal appeal = appealMapper.selectOne(Wrappers.<Appeal>lambdaQuery()
+                .eq(Appeal::getOrderId, orderId));
+        assertThat(appeal).isNotNull();
+        assertThat(appeal.getApplicantId()).isEqualTo(OWNER);
+    }
+
     // ------------------------------------------------------------------ 工具
 
     private Long seedItem(long ownerId, BigDecimal lossValue) {

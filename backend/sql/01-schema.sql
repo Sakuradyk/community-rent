@@ -243,6 +243,9 @@ CREATE TABLE `rental_order` (
     `overdue_rate`       DECIMAL(6, 4)   NOT NULL              COMMENT '价格快照：逾期费率（×日租金/天）',
     `rent_amount`        DECIMAL(10, 2)  NOT NULL              COMMENT '租金 = daily_price × rent_days（下单时算出并冻结）',
     `overdue_days`       INT             NOT NULL DEFAULT 0    COMMENT '逾期天数（结算时写）',
+    `return_requested_at`    DATETIME            DEFAULT NULL COMMENT '承租方发起归还申请的时间（状态不变，只记时间戳；用于出租方超时未确认时自动结算）',
+    `return_requested_by`    VARCHAR(16)         DEFAULT NULL COMMENT '归还申请人：RENTER（当前只有承租方发起，留列便于将来扩展）',
+    `return_requested_state` VARCHAR(16)         DEFAULT NULL COMMENT '承租方申报的归还状态：INTACT / WORN / DAMAGED（出租方确认时以自己验收的为准，超时自动结算时按申报值）',
     `cancel_reason`      VARCHAR(255)             DEFAULT NULL COMMENT '取消原因',
     `cancel_by`          VARCHAR(16)              DEFAULT NULL COMMENT 'RENTER / OWNER / ADMIN',
     `remark`             VARCHAR(255)             DEFAULT NULL COMMENT '备注',
@@ -258,6 +261,7 @@ CREATE TABLE `rental_order` (
     KEY `idx_order_renter_status` (`renter_id`, `status`) COMMENT '我的租入',
     KEY `idx_order_owner_status` (`owner_id`, `status`)   COMMENT '我的租出',
     KEY `idx_order_scan` (`status`, `end_date`)           COMMENT '逾期扫描：未归还状态 + end_date 早于今天',
+    KEY `idx_order_return_request` (`status`, `return_requested_at`) COMMENT '归还申请超时扫描：承租方已申报但出租方未确认',
     -- K1：自租禁止（数据库层第二道防线；第一道在 Service 参数校验 → 3006 SELF_RENT_FORBIDDEN）
     CONSTRAINT `ck_order_bilateral` CHECK (`owner_id` <> `renter_id`),
     CONSTRAINT `ck_order_date_range` CHECK (`start_date` < `end_date`),

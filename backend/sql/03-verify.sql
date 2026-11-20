@@ -151,6 +151,17 @@ FROM order_occupancy o
 JOIN rental_order r ON r.id = o.order_id
 WHERE r.status IN ('COMPLETED', 'CANCELLED');
 
+-- A24 归还申请与订单状态必须自洽
+--   ① 未取用的订单（PENDING / CONFIRMED）不应该有归还申请
+--   ② 有归还申请就必须有申报的归还状态（否则超时自动结算时不知道按什么状态算损耗）
+--   ③ 申报状态只能是三态之一
+SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A24_return_request_consistent`, IFNULL(GROUP_CONCAT(r.id), '-') AS `bad_orders`
+FROM rental_order r
+WHERE (r.status IN ('PENDING', 'CONFIRMED') AND r.return_requested_at IS NOT NULL)
+   OR (r.return_requested_at IS NOT NULL
+       AND (r.return_requested_state IS NULL
+            OR r.return_requested_state NOT IN ('INTACT', 'WORN', 'DAMAGED')));
+
 SELECT 'user' AS tbl, COUNT(*) AS rows_cnt FROM `user`
 UNION ALL SELECT 'role', COUNT(*) FROM `role`
 UNION ALL SELECT 'community', COUNT(*) FROM `community`

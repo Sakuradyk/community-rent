@@ -20,6 +20,9 @@ import org.springframework.stereotype.Component;
  *
  * <p>cron 来自 {@code sys_config['settlement.scan.cron']}，改库即生效；
  * 与管理端「立即执行结算扫描」按钮调同一个方法 {@code settlementService.scanConfirmTimeout()}。</p>
+ *
+ * <p>同一个 tick 里还跑第二条腿 {@link SettlementService#scanReturnTimeout()}：
+ * 承租方发起归还申请后出租方超窗口未确认 → 按承租方申报状态自动结算（两者都幂等，共用一个 cron 即可）。</p>
  */
 @Slf4j
 @Component
@@ -42,6 +45,7 @@ public class SettlementScanJob implements SchedulingConfigurer {
     }
 
     private void runOnce() {
+        // 冷静期超时：PENDING_CONFIRM → SETTLED
         try {
             int updated = settlementService.scanConfirmTimeout();
             if (updated > 0) {
@@ -50,6 +54,15 @@ public class SettlementScanJob implements SchedulingConfigurer {
         } catch (Exception e) {
             // 定时任务不许把异常抛出去：一次失败不能让后续调度停摆
             log.error("定时结算冷静期扫描失败", e);
+        }
+        // 归还申请超时：承租方已申报、出租方超窗口未确认 → 按承租方申报状态自动结算
+        try {
+            int auto = settlementService.scanReturnTimeout();
+            if (auto > 0) {
+                log.info("定时任务：{} 单归还申请超过窗口未确认，已按承租方申报自动结算", auto);
+            }
+        } catch (Exception e) {
+            log.error("定时归还申请超时扫描失败", e);
         }
     }
 

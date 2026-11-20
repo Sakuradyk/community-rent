@@ -99,6 +99,25 @@ public class RentalOrder {
     private Integer overdueDays;
 
     /**
+     * 承租方发起归还申请的时间。
+     *
+     * <p>这一步**不改订单状态**（仍是 IN_USE / OVERDUE），只留时间戳：
+     * 出租方在 {@code order.return.confirm.hours} 小时内验收确认 → 按验收状态结算；
+     * 超时未确认 → 系统按 {@link #returnRequestedState} 自动结算（拖的一方承担不利后果）。</p>
+     */
+    private LocalDateTime returnRequestedAt;
+
+    /**
+     * 归还申请人：RENTER（当前只有承租方能发起，留列便于将来扩展）
+     */
+    private String returnRequestedBy;
+
+    /**
+     * 承租方申报的归还状态：INTACT / WORN / DAMAGED
+     */
+    private String returnRequestedState;
+
+    /**
      * 取消原因
      */
     private String cancelReason;

@@ -61,3 +61,16 @@ export function cancelOrder(id, data) {
 export function returnOrder(id, data) {
   return request.post(`/orders/${id}/return`, data)
 }
+
+/**
+ * 承租方发起归还申请（契约 §5.11）：只登记时间戳，订单状态仍是「使用中 / 已逾期」。
+ *
+ * 出租方须在 `order.return.confirm.hours`（默认 24）小时内验收确认；
+ * 超时由后端扫描任务按承租方申报的状态自动结算。
+ *
+ * @param {string|number} id 订单 id
+ * @param {{returnState: 'INTACT'|'WORN'|'DAMAGED', remark?: string}} data
+ */
+export function requestReturn(id, data) {
+  return request.post(`/orders/${id}/return/request`, data)
+}

@@ -202,6 +202,8 @@ public class OrderServiceImpl implements OrderService {
                 order.getDailyPrice(), deposit, order.getOverdueRate(),
                 rentAmount, rentAmount.add(deposit),
                 order.getRemark(),
+                order.getReturnRequestedAt(),
+                order.getReturnRequestedState(),
                 owner == null ? null : new OrderDetailVO.Party(owner.getId(), owner.getNickname()),
                 renter == null ? null : new OrderDetailVO.Party(renter.getId(), renter.getNickname()),
                 order.getCreatedAt());

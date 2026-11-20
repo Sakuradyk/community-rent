@@ -135,7 +135,9 @@ INSERT INTO `sys_config` (`config_key`, `config_value`, `value_type`, `config_gr
 ('community.priority.enabled', '1',       'BOOLEAN', 'community', '列表是否按同小区>同片区优先排序'),
 -- 结算冷静期（K3）：承租方在这段时间内可以「无异议」或「提异议」，超时默认接受
 ('settlement.confirm.hours', '48',        'INT',     'settlement', '结算冷静期小时数（承租方确认窗口）'),
-('settlement.scan.cron',     '0 5 * * * ?', 'CRON',  'settlement', '冷静期超时扫描表达式');
+('settlement.scan.cron',     '0 5 * * * ?', 'CRON',  'settlement', '冷静期超时扫描表达式'),
+-- 归还申请（K3 补充）：承租方点「我已归还」后，出租方需在这段时间内验收确认，超时按承租方申报自动结算
+('order.return.confirm.hours', '24',      'INT',     'order',     '承租方发起归还申请后，出租方确认的超时小时数');
 
 -- ---------------------------------------------------------------------------
 -- 8. 演示订单（覆盖三种"占用形态"，供前端联调与 K2 断言使用）

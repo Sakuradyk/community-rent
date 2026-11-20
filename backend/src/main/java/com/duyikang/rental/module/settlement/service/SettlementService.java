@@ -13,13 +13,35 @@ import com.duyikang.rental.module.settlement.vo.SettlementDetailVO;
 public interface SettlementService {
 
     /**
-     * 出租方标记归还：订单完成 + 释放占用 + 生成结算单（PENDING_CONFIRM）+ 资金流水 + 损耗日志 + 信誉变动
+     * 出租方验收并确认归还：订单完成 + 释放占用 + 生成结算单（PENDING_CONFIRM）+ 资金流水 + 损耗日志 + 信誉变动。
+     *
+     * <p>承租方可以先{@link #requestReturn 发起归还申请}，也可以由出租方直接确认（线下当场归还的常见情形）。
+     * 出租方确认时以**自己验收的状态**为准。</p>
      *
      * @param orderId 订单 id
      * @param dto     归还请求（归还状态、备注）
      * @return 生成的结算单详情
      */
     SettlementDetailVO returnItem(Long orderId, OrderReturnDTO dto);
+
+    /**
+     * 承租方发起归还申请：只记时间戳（订单状态不变，仍是 IN_USE / OVERDUE）。
+     *
+     * <p>用于解决"承租方已经还了、出租方拖着不点确认"的单边权力死角：
+     * 申请后出租方须在 {@code order.return.confirm.hours}（默认 24）小时内验收确认，
+     * 超时由 {@link #scanReturnTimeout()} 按承租方申报的状态自动结算。</p>
+     *
+     * @param orderId 订单 id
+     * @param dto     归还状态（承租方申报）+ 备注
+     */
+    void requestReturn(Long orderId, OrderReturnDTO dto);
+
+    /**
+     * 归还申请超时扫描：承租方已申报、出租方超过窗口未确认的订单，按承租方申报状态自动结算。
+     *
+     * @return 本次自动结算的订单数
+     */
+    int scanReturnTimeout();
 
     /**
      * 按订单查结算单（仅订单双边与管理员）

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { cancelOrder, confirmOrder, getOrder, pickupOrder, returnOrder } from '@/api/order'
+import { cancelOrder, confirmOrder, getOrder, pickupOrder, requestReturn, returnOrder } from '@/api/order'
 import { useUserStore } from '@/stores/user'
 import { ORDER_STATUS, RETURN_STATE, statusOf } from '@/utils/constants'
 import { formatDate, formatDateTime, formatMoney, resolveImageUrl } from '@/utils/format'
@@ -17,6 +17,7 @@ const acting = ref(false)
 const errorText = ref('')
 
 const statusMeta = (status) => statusOf(ORDER_STATUS, status)
+const returnLabel = (state) => RETURN_STATE[state]?.label || state
 
 // 身份判断用字符串比较：后端把 Long 序列化成字符串，直接 === 数字永远不成立
 const isOwner = computed(() => String(order.value?.owner?.id) === String(userStore.profile?.id))
@@ -24,6 +25,10 @@ const isRenter = computed(() => String(order.value?.renter?.id) === String(userS
 const canConfirm = computed(() => isOwner.value && order.value?.status === 'PENDING')
 const canPickup = computed(() => isOwner.value && order.value?.status === 'CONFIRMED')
 const canReturn = computed(() => isOwner.value && ['IN_USE', 'OVERDUE'].includes(order.value?.status))
+// 承租方发起归还申请：还没申报过、且订单仍在使用中/已逾期（申报后状态不变，所以靠时间戳去重）
+const canRequestReturn = computed(
+  () => isRenter.value && ['IN_USE', 'OVERDUE'].includes(order.value?.status) && !order.value?.returnRequestedAt,
+)
 const canCancel = computed(
   () => (isOwner.value || isRenter.value) && ['PENDING', 'CONFIRMED'].includes(order.value?.status),
 )
@@ -35,6 +40,9 @@ const canViewSettlement = computed(() =>
 const returnDialogVisible = ref(false)
 const returning = ref(false)
 const returnForm = ref({ returnState: 'INTACT', remark: '' })
+const requestDialogVisible = ref(false)
+const requesting = ref(false)
+const requestForm = ref({ returnState: 'INTACT', remark: '' })
 const returnStateList = Object.entries(RETURN_STATE).map(([value, meta]) => ({ value, ...meta }))
 
 async function load() {
@@ -79,6 +87,32 @@ async function onCancel() {
 function openReturnDialog() {
   returnForm.value = { returnState: 'INTACT', remark: '' }
   returnDialogVisible.value = true
+}
+
+/**
+ * 承租方发起归还申请（契约 §5.11）：只登记时间戳，订单状态不变。
+ * 出租方 24 小时内不确认时，后端按这里申报的成色自动结算。
+ */
+function openRequestDialog() {
+  requestForm.value = { returnState: 'INTACT', remark: '' }
+  requestDialogVisible.value = true
+}
+
+async function submitRequestReturn() {
+  requesting.value = true
+  try {
+    await requestReturn(order.value.id, {
+      returnState: requestForm.value.returnState,
+      remark: requestForm.value.remark || undefined,
+    })
+    requestDialogVisible.value = false
+    ElMessage.success('已提交归还申请，等待出租方验收确认（超时后端会按申报成色自动结算）')
+    await load()
+  } catch {
+    // 3001（已申请过/状态不对）/ 3008（不是承租方）由 request.js 提示
+  } finally {
+    requesting.value = false
+  }
 }
 
 /**
@@ -156,10 +190,33 @@ onMounted(load)</script>
               <span v-if="order.remark">{{ order.remark }}</span>
               <span v-else class="muted">无</span>
             </el-descriptions-item>
+            <el-descriptions-item v-if="order.returnRequestedAt" label="归还申请">
+              承租方申报：{{ returnLabel(order.returnRequestedState) }}（{{ formatDateTime(order.returnRequestedAt) }}）
+            </el-descriptions-item>
           </el-descriptions>
+          <el-alert
+            v-if="isOwner && order.returnRequestedAt && ['IN_USE', 'OVERDUE'].includes(order.status)"
+            class="return-tip"
+            type="warning"
+            show-icon
+            :closable="false"
+            title="承租方已申报归还，请验收后点「确认归还」"
+          >
+            以你验收的成色为准结算；超过 24 小时未确认，系统会按承租方申报的成色自动结算。
+          </el-alert>
+          <el-alert
+            v-if="isRenter && order.returnRequestedAt && ['IN_USE', 'OVERDUE'].includes(order.status)"
+            class="return-tip"
+            type="info"
+            show-icon
+            :closable="false"
+            title="你已发起归还申请，等待出租方验收"
+          >
+            出租方超过 24 小时未确认时，系统按你申报的成色自动结算，之后你会收到结算单可以确认或提异议。
+          </el-alert>
           <p class="muted small">
-            状态流转：出租方「确认出租 → 标记取用 → 确认归还」，双方都可在取用前取消。归还后进入结算冷静期，
-            承租方确认无异议（或 48 小时超时）才算结清。
+            状态流转：出租方「确认出租 → 标记取用」；归还由承租方「我已归还」申报 + 出租方「确认归还」验收（超时按申报自动结算）。
+            双方都可在取用前取消。归还后进入结算冷静期，承租方确认无异议（或 48 小时超时）才算结清。
           </p>
         </section>
       </div>
@@ -180,6 +237,7 @@ onMounted(load)</script>
         <el-button v-if="canConfirm" type="primary" :loading="acting" @click="onConfirm">确认出租</el-button>
         <el-button v-if="canPickup" type="primary" :loading="acting" @click="onPickup">标记已取用</el-button>
         <el-button v-if="canReturn" type="primary" :loading="acting" @click="openReturnDialog">确认归还</el-button>
+        <el-button v-if="canRequestReturn" type="primary" :loading="acting" @click="openRequestDialog">我已归还</el-button>
         <el-button
           v-if="order.status === 'COMPLETED'"
           plain
@@ -216,6 +274,36 @@ onMounted(load)</script>
         <template #footer>
           <el-button @click="returnDialogVisible = false">取消</el-button>
           <el-button type="primary" :loading="returning" @click="submitReturn">确认归还</el-button>
+        </template>
+      </el-dialog>
+
+      <el-dialog v-model="requestDialogVisible" title="我已归还（发起归还申请）" width="440px">
+        <el-form label-width="88px">
+          <el-form-item label="物品成色" required>
+            <el-radio-group v-model="requestForm.returnState">
+              <el-radio v-for="item in returnStateList" :key="item.value" :value="item.value">
+                {{ item.label }}（系数 {{ item.coef }}）
+              </el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="备注">
+            <el-input
+              v-model="requestForm.remark"
+              type="textarea"
+              :rows="3"
+              maxlength="255"
+              show-word-limit
+              placeholder="例如：今天下午已送到门口"
+            />
+          </el-form-item>
+        </el-form>
+        <p class="muted small hint">
+          提交后订单仍是「使用中」，等出租方验收确认才生成结算单。
+          出租方超过 24 小时未确认时，系统按你申报的成色自动结算 —— 所以成色请如实填写。
+        </p>
+        <template #footer>
+          <el-button @click="requestDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="requesting" @click="submitRequestReturn">提交申报</el-button>
         </template>
       </el-dialog>
     </template>
@@ -298,5 +386,10 @@ onMounted(load)</script>
 
 .spacer {
   flex: 1;
+}
+
+.return-tip {
+  margin-top: $space-3;
+  border-radius: $radius-base;
 }
 </style>

@@ -25,7 +25,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 订单接口（切片 3：试算 / 下单 / 详情 / 列表；切片 4：确认 / 取用 / 取消）。
+ * 订单接口（切片 3：试算 / 下单 / 详情 / 列表；切片 4：确认 / 取用 / 取消；切片 5：归还申请与归还）。
  *
  * <p>所有接口都要求登录（Security 默认 {@code anyRequest().authenticated()}，
  * 本路径没有进白名单）。Controller 只做"收参数 + 包 Result"，业务与校验顺序全在 Service。</p>
@@ -123,5 +123,19 @@ public class OrderController {
     public Result<SettlementDetailVO> returnItem(@PathVariable Long id,
                                                  @Valid @RequestBody OrderReturnDTO dto) {
         return Result.ok(settlementService.returnItem(id, dto));
+    }
+
+    /**
+     * 承租方发起归还申请：只记时间戳，订单状态不变（仍是「使用中 / 已逾期」）。
+     *
+     * <p>出租方须在 {@code order.return.confirm.hours}（默认 24）小时内验收确认；
+     * 超时由管理端 / 定时任务按承租方申报的状态自动结算（接口文档 §5.11）。
+     * 这条路径解决"承租方已经还了、出租方拖着不点确认"的单边死角。</p>
+     */
+    @PostMapping("/{id}/return/request")
+    public Result<Void> requestReturn(@PathVariable Long id,
+                                     @Valid @RequestBody OrderReturnDTO dto) {
+        settlementService.requestReturn(id, dto);
+        return Result.ok();
     }
 }

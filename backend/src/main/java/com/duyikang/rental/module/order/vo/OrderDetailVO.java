@@ -32,6 +32,8 @@ public record OrderDetailVO(
         BigDecimal rentAmount,
         BigDecimal totalAmount,
         String remark,
+        LocalDateTime returnRequestedAt,
+        String returnRequestedState,
         Party owner,
         Party renter,
         LocalDateTime createdAt
