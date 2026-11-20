@@ -24,6 +24,12 @@ const routes = [
         name: 'audit',
         component: () => import('@/views/audit/AuditView.vue'),
         meta: { title: '物品审核', requiresAdmin: true }
+      },
+      {
+        path: 'appeals',
+        name: 'appeals',
+        component: () => import('@/views/appeal/AppealView.vue'),
+        meta: { title: '申诉裁决', requiresAdmin: true }
       }
     ]
   },

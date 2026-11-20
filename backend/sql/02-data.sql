@@ -132,7 +132,10 @@ INSERT INTO `sys_config` (`config_key`, `config_value`, `value_type`, `config_gr
 ('order.scan.cron',         '0 0 * * * ?', 'CRON',   'order',     '逾期扫描表达式'),
 ('order.max_days',          '30',         'INT',     'order',     '单笔订单最长租期（天）'),
 -- 就近优先开关：1 开启（默认，FR-M1-03）、0 关闭（回退纯热度排序，用于 FR-M5-01 的消融对比）
-('community.priority.enabled', '1',       'BOOLEAN', 'community', '列表是否按同小区>同片区优先排序');
+('community.priority.enabled', '1',       'BOOLEAN', 'community', '列表是否按同小区>同片区优先排序'),
+-- 结算冷静期（K3）：承租方在这段时间内可以「无异议」或「提异议」，超时默认接受
+('settlement.confirm.hours', '48',        'INT',     'settlement', '结算冷静期小时数（承租方确认窗口）'),
+('settlement.scan.cron',     '0 5 * * * ?', 'CRON',  'settlement', '冷静期超时扫描表达式');
 
 -- ---------------------------------------------------------------------------
 -- 8. 演示订单（覆盖三种"占用形态"，供前端联调与 K2 断言使用）

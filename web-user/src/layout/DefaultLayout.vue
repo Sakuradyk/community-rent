@@ -19,6 +19,9 @@
           <router-link v-if="userStore.isLogin" :to="{ name: 'orders' }" class="nav-item">
             我的订单
           </router-link>
+          <router-link v-if="userStore.isLogin" :to="{ name: 'credits' }" class="nav-item">
+            我的信誉
+          </router-link>
           <router-link to="/mine" class="nav-item">我的</router-link>
         </nav>
 

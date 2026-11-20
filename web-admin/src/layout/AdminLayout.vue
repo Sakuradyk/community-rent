@@ -5,6 +5,7 @@
       <el-menu :default-active="activeMenu" router class="menu">
         <el-menu-item index="/">概览</el-menu-item>
         <el-menu-item index="/audit">物品审核</el-menu-item>
+    <el-menu-item index="/appeals">申诉裁决</el-menu-item>
       </el-menu>
       <div class="aside-foot muted">待接入：物品审核 / 配置 / 申诉</div>
     </el-aside>

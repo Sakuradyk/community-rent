@@ -11,6 +11,9 @@ import com.duyikang.rental.module.order.vo.OrderCreatedVO;
 import com.duyikang.rental.module.order.vo.OrderDetailVO;
 import com.duyikang.rental.module.order.vo.OrderListItemVO;
 import com.duyikang.rental.module.order.vo.OrderQuoteVO;
+import com.duyikang.rental.module.settlement.dto.OrderReturnDTO;
+import com.duyikang.rental.module.settlement.service.SettlementService;
+import com.duyikang.rental.module.settlement.vo.SettlementDetailVO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -37,6 +40,7 @@ public class OrderController {
 
     private final OrderService orderService;
     private final OrderStateService orderStateService;
+    private final SettlementService settlementService;
 
     /**
      * 费用试算：不写库。冲突时返回 4090 + 冲突日期与候选时段（见接口文档 §3.1）。
@@ -104,5 +108,20 @@ public class OrderController {
     public Result<Void> cancel(@PathVariable Long id, @Valid @RequestBody(required = false) OrderCancelDTO dto) {
         orderStateService.cancel(id, dto);
         return Result.ok();
+    }
+
+    // ------------------------------------------------------------------ 切片 5：归还与结算
+
+    /**
+     * 出租方标记归还：{@code IN_USE / OVERDUE → COMPLETED}，同事务生成结算单（冷静期）并释放占用（接口文档 §5.1）。
+     *
+     * @param id  订单 id
+     * @param dto 归还状态与备注
+     * @return 生成的结算单详情
+     */
+    @PostMapping("/{id}/return")
+    public Result<SettlementDetailVO> returnItem(@PathVariable Long id,
+                                                 @Valid @RequestBody OrderReturnDTO dto) {
+        return Result.ok(settlementService.returnItem(id, dto));
     }
 }

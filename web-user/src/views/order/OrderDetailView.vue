@@ -2,9 +2,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { cancelOrder, confirmOrder, getOrder, pickupOrder } from '@/api/order'
+import { cancelOrder, confirmOrder, getOrder, pickupOrder, returnOrder } from '@/api/order'
 import { useUserStore } from '@/stores/user'
-import { ORDER_STATUS, statusOf } from '@/utils/constants'
+import { ORDER_STATUS, RETURN_STATE, statusOf } from '@/utils/constants'
 import { formatDate, formatDateTime, formatMoney, resolveImageUrl } from '@/utils/format'
 
 const route = useRoute()
@@ -23,9 +23,19 @@ const isOwner = computed(() => String(order.value?.owner?.id) === String(userSto
 const isRenter = computed(() => String(order.value?.renter?.id) === String(userStore.profile?.id))
 const canConfirm = computed(() => isOwner.value && order.value?.status === 'PENDING')
 const canPickup = computed(() => isOwner.value && order.value?.status === 'CONFIRMED')
+const canReturn = computed(() => isOwner.value && ['IN_USE', 'OVERDUE'].includes(order.value?.status))
 const canCancel = computed(
   () => (isOwner.value || isRenter.value) && ['PENDING', 'CONFIRMED'].includes(order.value?.status),
 )
+// 结算单在归还那一刻生成，之后（含冷静期、已结算、被调整）都该能看
+const canViewSettlement = computed(() =>
+  ['IN_USE', 'OVERDUE', 'COMPLETED'].includes(order.value?.status),
+)
+
+const returnDialogVisible = ref(false)
+const returning = ref(false)
+const returnForm = ref({ returnState: 'INTACT', remark: '' })
+const returnStateList = Object.entries(RETURN_STATE).map(([value, meta]) => ({ value, ...meta }))
 
 async function load() {
   loading.value = true
@@ -66,8 +76,33 @@ async function onCancel() {
   await runAction(() => cancelOrder(order.value.id, { reason: result.value || undefined }), '订单已取消，占用已释放')
 }
 
-onMounted(load)
-</script>
+function openReturnDialog() {
+  returnForm.value = { returnState: 'INTACT', remark: '' }
+  returnDialogVisible.value = true
+}
+
+/**
+ * 确认归还：后端一次性算逾期费/损耗费、生成结算单（冷静期）、释放占用、给双方记信誉。
+ * 成功后直接跳结算单页 —— 承租方要在这里点「确认无异议」或「提异议」。
+ */
+async function submitReturn() {
+  returning.value = true
+  try {
+    await returnOrder(order.value.id, {
+      returnState: returnForm.value.returnState,
+      remark: returnForm.value.remark || undefined,
+    })
+    returnDialogVisible.value = false
+    ElMessage.success('已归还，结算单已生成，等待承租方确认')
+    router.push({ name: 'settlement', params: { orderId: order.value.id } })
+  } catch {
+    // 3001（状态不对）/ 3008（不是出租方）/ 4003（已有结算单）由 request.js 提示
+  } finally {
+    returning.value = false
+  }
+}
+
+onMounted(load)</script>
 
 <template>
   <div class="page-container">
@@ -123,7 +158,8 @@ onMounted(load)
             </el-descriptions-item>
           </el-descriptions>
           <p class="muted small">
-            状态流转：出租方「确认出租 → 标记取用」，双方都可在取用前取消；取用后只能走归还（切片 5 开放，含结算冷静期）。
+            状态流转：出租方「确认出租 → 标记取用 → 确认归还」，双方都可在取用前取消。归还后进入结算冷静期，
+            承租方确认无异议（或 48 小时超时）才算结清。
           </p>
         </section>
       </div>
@@ -143,7 +179,45 @@ onMounted(load)
         <el-button v-if="canCancel" :loading="acting" @click="onCancel">取消订单</el-button>
         <el-button v-if="canConfirm" type="primary" :loading="acting" @click="onConfirm">确认出租</el-button>
         <el-button v-if="canPickup" type="primary" :loading="acting" @click="onPickup">标记已取用</el-button>
+        <el-button v-if="canReturn" type="primary" :loading="acting" @click="openReturnDialog">确认归还</el-button>
+        <el-button
+          v-if="order.status === 'COMPLETED'"
+          plain
+          @click="router.push({ name: 'settlement', params: { orderId: order.id } })"
+        >
+          查看结算单
+        </el-button>
       </div>
+
+      <el-dialog v-model="returnDialogVisible" title="确认归还" width="440px">
+        <el-form label-width="88px">
+          <el-form-item label="物品成色" required>
+            <el-radio-group v-model="returnForm.returnState">
+              <el-radio v-for="item in returnStateList" :key="item.value" :value="item.value">
+                {{ item.label }}（系数 {{ item.coef }}）
+              </el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="备注">
+            <el-input
+              v-model="returnForm.remark"
+              type="textarea"
+              :rows="3"
+              maxlength="255"
+              show-word-limit
+              placeholder="例如：外壳有一道细划痕"
+            />
+          </el-form-item>
+        </el-form>
+        <p class="muted small hint">
+          归还后系统按「实际归还日」算逾期费、按成色算损耗费，生成结算单进入 48 小时冷静期；
+          承租方确认（或超时）后结算生效。成色会累加进物品的损耗值，超过 0.85 的物品转检修不可再租。
+        </p>
+        <template #footer>
+          <el-button @click="returnDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="returning" @click="submitReturn">确认归还</el-button>
+        </template>
+      </el-dialog>
     </template>
   </div>
 </template>

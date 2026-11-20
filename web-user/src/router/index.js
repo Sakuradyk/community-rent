@@ -76,6 +76,18 @@ const routes = [
         meta: { title: '订单详情', requiresAuth: true }
       },
       {
+        path: 'settlements/:orderId',
+        name: 'settlement',
+        component: () => import('@/views/settlement/SettlementView.vue'),
+        meta: { title: '结算单', requiresAuth: true }
+      },
+      {
+        path: 'credits',
+        name: 'credits',
+        component: () => import('@/views/credit/CreditView.vue'),
+        meta: { title: '我的信誉', requiresAuth: true }
+      },
+      {
         path: 'mine',
         name: 'mine',
         component: () => import('@/views/mine/ProfileView.vue'),

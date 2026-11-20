@@ -46,3 +46,18 @@ export function pickupOrder(id) {
 export function cancelOrder(id, data) {
   return request.post(`/orders/${id}/cancel`, data)
 }
+
+// ------------------------------------------------- 切片 5：归还（契约 §5.1）
+
+/**
+ * 出租方确认归还：IN_USE / OVERDUE → COMPLETED。
+ *
+ * 后端会一并算逾期费与损耗费、生成结算单（进入冷静期 PENDING_CONFIRM）、
+ * 释放占用、给双方记信誉。返回结算单详情，前端直接跳结算页。
+ *
+ * @param {string|number} id 订单 id
+ * @param {{returnState: 'INTACT'|'WORN'|'DAMAGED', remark?: string}} data
+ */
+export function returnOrder(id, data) {
+  return request.post(`/orders/${id}/return`, data)
+}

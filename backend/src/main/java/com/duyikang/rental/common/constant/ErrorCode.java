@@ -38,6 +38,8 @@ public enum ErrorCode {
     ITEM_AUDIT_PENDING(3007, "物品正在审核中"),
     PERMISSION_DENIED_FOR_RESOURCE(3008, "无权操作该资源"),
     APPEAL_STATE_INVALID(3009, "申诉当前状态不允许该操作"),
+    SETTLEMENT_NOT_FOUND(3010, "结算单不存在"),
+    APPEAL_NOT_FOUND(3011, "申诉不存在"),
 
     // ========== 4xxx 费用与结算 ==========
     FEE_OUT_OF_RANGE(4001, "金额超出允许范围"),

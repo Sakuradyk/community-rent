@@ -72,6 +72,40 @@ export const USER_STATUS = {
   DISABLED: { label: '已禁用', tag: 'danger', color: '#b91c1c' }
 }
 
+/**
+ * 结算单状态（切片 5 冷静期四态，与后端 SettlementStatus 一一对应）。
+ * PENDING_CONFIRM 是冷静期进行中：承租方要么点无异议，要么提异议，超时由定时任务自动确认。
+ */
+export const SETTLEMENT_STATUS = {
+  PENDING_CONFIRM: { label: '待确认', tag: 'warning', color: '#b45309' },
+  SETTLED: { label: '已结算', tag: 'success', color: '#15803d' },
+  DISPUTED: { label: '有异议', tag: 'danger', color: '#b91c1c' },
+  ADJUSTED: { label: '已调整', tag: 'info', color: '#1d4ed8' }
+}
+
+/** 归还状态（承租方归还时物品的成色，直接决定损耗系数） */
+export const RETURN_STATE = {
+  INTACT: { label: '完好', tag: 'success', color: '#15803d', coef: 1.0 },
+  WORN: { label: '轻微磨损', tag: 'warning', color: '#b45309', coef: 1.5 },
+  DAMAGED: { label: '损坏', tag: 'danger', color: '#b91c1c', coef: 3.0 }
+}
+
+/** 资金流水类型与方向（只做展示，金额一律后端算） */
+export const FLOW_TYPE = {
+  RENT: { label: '租金', direction: 'IN' },
+  DEPOSIT: { label: '押金', direction: 'IN' },
+  OVERDUE: { label: '逾期费', direction: 'IN' },
+  LOSS: { label: '损耗费', direction: 'IN' },
+  REFUND: { label: '退还押金', direction: 'OUT' }
+}
+
+/** 物品处置动作（按归还后的累计损耗 L 决定） */
+export const LOSS_ACTION = {
+  NONE: { label: '无需处置', tag: 'success', color: '#15803d' },
+  MAINTAIN: { label: '需保养', tag: 'warning', color: '#b45309' },
+  REPAIR: { label: '转检修', tag: 'danger', color: '#b91c1c' }
+}
+
 /** 角色码 */
 export const ROLE = {
   USER: 'USER',

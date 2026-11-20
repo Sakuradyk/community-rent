@@ -5,6 +5,7 @@ import com.duyikang.rental.common.constant.ErrorCode;
 import com.duyikang.rental.common.constant.ItemStatus;
 import com.duyikang.rental.common.constant.OrderStatus;
 import com.duyikang.rental.common.exception.BizException;
+import com.duyikang.rental.module.credit.service.CreditService;
 import com.duyikang.rental.module.item.entity.Item;
 import com.duyikang.rental.module.item.mapper.ItemMapper;
 import com.duyikang.rental.module.order.dto.OrderCancelDTO;
@@ -50,6 +51,7 @@ public class OrderStateServiceImpl implements OrderStateService {
     private final RentalOrderMapper rentalOrderMapper;
     private final OrderOccupancyMapper orderOccupancyMapper;
     private final ItemMapper itemMapper;
+    private final CreditService creditService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -124,6 +126,12 @@ public class OrderStateServiceImpl implements OrderStateService {
                 .eq(RentalOrder::getId, orderId)
                 .in(RentalOrder::getStatus, CANCELLABLE_STATUSES));
         requireChanged(rows, orderId, "取消", OrderStatus.PENDING);
+
+        // K4：已确认后被取消，发起取消的一方扣 3 分（出租方确认过又反悔属于违约；管理员代取消不计分）
+        if (OrderStatus.CONFIRMED.equals(order.getStatus()) && !"ADMIN".equals(cancelBy)) {
+            creditService.apply(user.userId(), orderId, "CANCEL_AFTER_CONFIRM", -3,
+                    "出租方已确认后取消订单，信誉 -3");
+        }
 
         // 释放占用：这是 K2 的"放"，漏了就会把那几天永久占死
         int released = releaseOccupancy(orderId);

@@ -1,6 +1,7 @@
 package com.duyikang.rental.module.credit.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
@@ -36,8 +37,14 @@ public class CreditLog {
     private Long orderId;
 
     /**
-     * 变动值，正加负减
+     * 变动值，正加负减。
+     *
+     * <p><b>列名必须用反引号包住</b>：`change` 是 MySQL 保留字，不加反引号时
+     * MyBatis-Plus 拼出的 `SELECT change FROM credit_log` 会直接报
+     * `BadSqlGrammarException`（语法错误在 change 附近）。实体层的 @TableField
+     * 是唯一正确落点，靠在 Wrapper 里手写列名绕不过这条（其它地方仍会踩）。</p>
      */
+    @TableField("`change`")
     private Integer change;
 
     /**

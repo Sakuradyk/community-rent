@@ -71,9 +71,24 @@ public class Settlement {
     private BigDecimal refundDeposit;
 
     /**
-     * SETTLED 已结算 / ADJUSTED 已被裁决调整
+     * PENDING_CONFIRM 待承租方确认 / SETTLED 已结算 / DISPUTED 有异议（申诉中）/ ADJUSTED 已被裁决调整
      */
     private String status;
+
+    /**
+     * 冷静期截止 = 归还时间 + settlement.confirm.hours（PENDING_CONFIRM 必填）
+     */
+    private LocalDateTime confirmDeadline;
+
+    /**
+     * 承租方点「无异议」的时间
+     */
+    private LocalDateTime confirmedAt;
+
+    /**
+     * 承租方提出异议的时间
+     */
+    private LocalDateTime disputedAt;
 
     /**
      * 操作人（系统自动结算时为 null）
@@ -87,7 +102,7 @@ public class Settlement {
     private String remark;
 
     /**
-     * 结算时间
+     * 结算生效时间（SETTLED / ADJUSTED 时写入）
      */
     private LocalDateTime settledAt;
 

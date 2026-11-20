@@ -12,7 +12,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.16 · 2026-11-19 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
+> **版本**：v1.17 · 2026-11-20 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
 
 ---
 
@@ -102,7 +102,7 @@
 | MySQL | **8.0.39**，服务名 `MySQL80`，端口 3306 | 已运行 |
 | MySQL 客户端 | `E:\MySQL\MySQL Server 8.0\bin\mysql.exe` | 不在 PATH |
 | MySQL 账号 | `root` / `123456`（仅本机开发） | — |
-| Redis | 服务名 `Redis`，`127.0.0.1:6379`，**版本 5.0.14.1**（已实测 `INFO server`），安装目录 `C:\Users\duyikang\Doubao\chats\2026-07-22\new-chat\Redis\` | 已运行；`redis-cli.exe` 与 `redis-server.exe` 都在该目录，**不在 PATH**。是 tporadowski 的 Windows 移植版，非官方 7.x，**没有 ACL / `ZADD GT` 等 6.x+ 命令** |
+| Redis | 服务名 `Redis`，`127.0.0.1:6379`，**版本 5.0.14.1**（已实测 `INFO server`），安装目录 `C:\Users\duyikang\Doubao\chats\2026-07-22\new-chat\Redis` | 已运行；`redis-cli.exe` 与 `redis-server.exe` 都在该目录，**不在 PATH**。是 tporadowski 的 Windows 移植版，非官方 7.x，**没有 ACL / `ZADD GT` 等 6.x+ 命令** |
 | Redis 密码 | `123456`（`requirepass`） | **必须配 `spring.data.redis.password`，否则连接报 NOAUTH** |
 | Node.js | `v24.10.0` | — |
 | 包管理器 | `pnpm`（优先）、`npm` | 前端统一用 pnpm |
@@ -727,6 +727,52 @@ int rows = rentalOrderMapper.update(null, Wrappers.<RentalOrder>lambdaUpdate()
 1. 物品一旦 `RENTED` 就不能再下单 —— 测「取消释放占用后别人能重新下单」时，**必须换一件物品**，否则拿到的是 3003 而不是预期的 2001/4090。
 2. `SchedulingConfigurer` 的 `CronTrigger.nextExecution(...)` 返回 `Instant`，不要再包一层 `LocalDateTime`。
 
+### 8.5 结算与冷静期规范（K3 / K4，**金额一律由后端算**）
+
+**一、归还（`return`）是一个"五合一"原子操作**，顺序不能改：
+
+```
+校验（出租方 3008 → 状态 IN_USE/OVERDUE 3001 → 成色合法 2001 → 无结算单 4003）
+  → 算逾期费与损耗费（FeeCalculator，纯静态、只吃策略对象）
+  → INSERT settlement（PENDING_CONFIRM + confirm_deadline）
+  → INSERT fee_flow（RENT / OVERDUE / LOSS / REFUND，金额来自结算单，不重算）
+  → UPDATE rental_order（COMPLETED + actual_return_date + overdue_days）
+  → DELETE order_occupancy（释放时段）
+  → 写回 item.loss_value / item.status（按 action 决定 ON_SHELF 还是 MAINTAINING）
+  → applyCredit（双方各一条 credit_log）
+```
+
+全部在一个 `@Transactional(rollbackFor = Exception.class)` 里。**任何一步漏掉都是数据事故**：
+漏删占用 = 那几天永久占死；漏写回 `item.loss_value` = 损耗白算；漏 `fee_flow` = 账对不上。
+
+**二、金额与损耗只能有一处实现。**
+
+| 规定 | 内容 |
+| :-- | :-- |
+| 唯一入口 | `module/settlement/calc/FeeCalculator`（纯静态方法，不注入、不查库）。Service 与 Controller **都不许**自己乘除 |
+| 逾期费 | `dailyPrice × [min(days, tier1Days) × overdueRate + max(0, days − tier1Days) × overdueRate × tier2Rate / tier1Rate]`，其中 `overdueRate` 取**订单快照**，`tier1Days`/`tier2Rate`/`tier1Rate` 取 `fee_policy` |
+| 损耗 | `w = termCoef(租期档) × categoryCoef(类目) × returnCoef(成色)`，`returnCoef`：完好 1.0 / 磨损 1.5 / 损坏 3.0；`lossFee = deposit × w`，`w` 四舍五入到 4 位、`lossFee` 到 2 位 |
+| 累计损耗 | `L_after = min(1, L_before + w)`，写回 `item.loss_value`；`L ≥ 0.85` → `MAINTAINING` + `REPAIR`，`≥ 0.6` → `MAINTAIN`，`item.status` 只在非检修时回 `ON_SHELF` |
+| 应退 | `refund = max(deposit − overdueFee − lossFee, 0)`（下限 0，与 `ck_settle_amounts`、`A5` 断言一致） |
+| 禁止 | 前端传金额（DTO 里就不许有金额字段）、`double` 参与金额、自己拼 `BigDecimal.setScale` 规则 |
+
+**三、冷静期（四态）**：`PENDING_CONFIRM → SETTLED | DISPUTED | ADJUSTED`
+
+| 出口 | 触发 | 落库 |
+| :-- | :-- | :-- |
+| 确认无异议 | 承租方点按钮 | `SETTLED` + `confirmed_at` + `settled_at` |
+| 提异议 | 承租方填理由 | `DISPUTED` + `disputed_at`，并 INSERT 一条 `appeal(status=PENDING)` |
+| 超时 | `SettlementScanJob`（cron 从 `sys_config['settlement.scan.cron']` 读） | `SETTLED` + `settled_at` |
+| 裁决通过 | 管理员 `verdict` | `ADJUSTED` + `loss_fee = 0` + `refund = max(deposit − overdueFee, 0)` + `settled_at` |
+| 裁决驳回 | 管理员 `verdict` | `SETTLED` + 原金额 + `settled_at` |
+
+`confirm_deadline` 只能由后端算（`归还时间 + settlement.confirm.hours`），**不许**前端传；也只有**承租方**能确认/提异议，
+出租方点确认一律 `3008`（本来就是他认定的损耗，不能自己审自己）。裁决只能对 `PENDING` 的申诉做，重复裁决 → `3009`。
+
+**四、信誉（K4）**：`credit_log` 的 `uk_credit_biz(user_id, order_id, reason_code)` 是幂等键 —— 加减分前先查这张表，
+存在就跳过（防定时任务重跑、防连点）。加分按 `reward_daily_cap` 做当日封顶，结果值 `clamp(0, 100)` 后同时写 `before_score` 与 `after_score`。
+**`change` 是 MySQL 保留字**，实体字段必须 `@TableField("`change`")`，否则 MyBatis-Plus 拼出的 `SELECT change` 直接语法错。
+
 ---
 
 ## 9. 配置外置规范（**不许硬编码**）
@@ -937,3 +983,4 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-18 | 项目负责人 | **v1.14（切片 2 前端落地 + 类目字典补契约）**：①§4.7 页面清单按实际交付校准——首页路由 `/home` → `/`、个人中心 `/profile` → `/mine`，并补两张「已交付 / 未交付」清单（路由与清单必须同步，改路由就改这行）；②新增 §4.6 **F16**——列表/详情/发布页要用的字典（类目、社区）只走公开字典接口，**禁止在前端写死类目名或小区名**，也禁止把字典塞进 `constants.js` 当"伪枚举"（字典是数据，会随管理端增删；枚举是契约，必须与后端逐字一致）；③配套实绩：后端补 `GET /api/categories`（`CategoryVO` + `CategoryService` + `CategoryController`，`SecurityConfig` 放行，`CategoryServiceTest` 1 例，测试总数 74 → **75/75**），并在 `docs/接口文档.md` 以 **CONTRACT CHANGE** 方式登记 §2.12（冻结 §2 时遗漏了发布/筛选都要用的类目数据源）；前端 `web-user` 新增 `api/item.js`、`api/category.js`、`components/ItemCard.vue`、`components/OccupancyCalendar.vue`、`views/item/{ItemListView,ItemDetailView,ItemPublishView,ItemMineView}.vue`，`HomeView` 的切片进度表换成真实物品卡片流 + 类目入口，`DefaultLayout` 补「逛物品 / 发布 / 我的物品」导航；`web-admin` 新增 `api/item.js`、`views/audit/AuditView.vue`（默认只看待审核、通过即上架、驳回必须写原因）、`constants.js` 补 `ITEM_STATUS`；两端 `npm run build` 通过；④联调实测 31 条断言全过（经 8081 实例 + 仓库内 `.g3_front.mjs`，脚本已删除）：字典 11/5 条、匿名列表 total 6、详情图集 2 张、日历占用 11-20/21/22、非法月份 2003、发布多图 → 驳回（审核意见透出）→ 编辑回待审且审核意见清空 → 通过 → 公开列表可搜 → 下架消失 → 删除，以及匿名 1001 / 普通用户访问管理端 1002 |
 | 2026-11-19 | 项目负责人 | **v1.15（切片 3 后端 K2 落地）**：①§8.3 新增「前提 4：占用口径必须三处一致——`PENDING` 也算占用」，并给出两张 XML 的状态集合对照表（`OrderOccupancyMapper.xml` 的冲突判定、`ItemMapper.xml` 的列表 `available` 与详情日历）；实测踩过：漏 `PENDING` 会让刚下单的物品仍显示"可租"；②§8.3 的示例代码里 `tryLock` 失败原写 `BizException(LOCK_ACQUIRE_FAILED)`，与本节的"错误码口径"自相矛盾，改为转 4090；③§4.1 目录树补 `common/lock/`（`RedisLock`）、`common/config` 实际成员（`TraceIdFilter`/`MybatisPlusConfig`/`JacksonConfig`/`WebMvcConfig`/`FileStorageProperties`）、`module/order` 的双 Service 分工（`OrderService` 加锁不标事务 / `OrderTxService` 标事务）、`resources/mapper` 两个 XML；④配套实绩：`OrderStatus`、`RedisLock`（SET NX PX + Lua 比对删除）、`OrderQuoteDTO`/`OrderCreateDTO`（**不含任何金额字段**，金额一律服务端重算）、`OrderQuoteVO`/`OrderCreatedVO`/`OrderDetailVO`、`OrderService`+`OrderTxService` 及其实现、`OrderController`（`POST /api/orders/quote`、`POST /api/orders`、`GET /api/orders/{id}`）、`OrderOccupancyMapper.selectOccupiedDates` + XML；`docs/接口文档.md` 新增 §3（切片 3 冻结：九条口径、4090 `suggestRanges` 生成规则、并发承诺）并登记 3005 与 3004 的语义分工；`OrderIntegrationTest` 13 例 + `OrderConcurrencyTest` 1 例（50 线程：成功 1 / 4090 49 / 无 5003、5000 / 占用 3 行无重复），测试总数 75 → **89/89**；G3 端到端 19 条断言全过（试算 3 天 75+100=175、下单 `R202611190001`、PENDING 也占日历、他人 4090 带 3 个 `conflictDates` 与 3 个互不重叠 `suggestRanges`、第三方看详情 3008、自租 3006、匿名 1001）；⑤口径备案：**创建即 PENDING 并立即占时段**（若等确认才占，待确认期间可重复下单，K2 破） |
 | 2026-11-19 | 项目负责人 | **v1.16（切片 4 订单状态流转）**：①新增 **§8.4 订单状态机规范**：状态迁移一律条件更新（`UPDATE ... WHERE id=? AND status=<旧态>`），受影响行数 0 → **3001 `ORDER_STATE_INVALID`**（绝不许用 3003，那是"物品不可租"）；状态迁移放独立 `OrderStateService` + `@Transactional`，`OrderServiceImpl`（加锁层）不标事务；**只有 cancel 与 return 释放 `order_occupancy`**，确认/取用/逾期扫描不动占用；`pickup` → 物品 `RENTED`、`cancel` → 回 `ON_SHELF`；定时任务 cron 从 `sys_config` 读（缺失回退并 warn）、`runOnce()` 必须吞异常、**必须提供管理端手动触发且与定时任务同一方法**；附两个测试坑（物品 `RENTED` 时不能下单，测取消释放占用要换物品；`CronTrigger.nextExecution` 返回 `Instant`）；②§4.1 目录树补 `OrderStateService+Impl`、`admin/` 的 `AdminOrderController`、`job/OrderScanJob`；③配套实绩：`OrderCancelDTO`、`OrderStateService`+`OrderStateServiceImpl`（`confirm`/`pickup`/`cancel`/`scanOverdue`、`requireChanged` 拼"需要旧态、当前现态"文案）、`ScanResultVO`、`AdminOrderController`（`POST /api/admin/orders/scan-overdue`）、`OrderController` 三个动作接口、`job/OrderScanJob`（`SchedulingConfigurer` + `CronTrigger`）；`docs/接口文档.md` 新增 §4（切片 4 冻结 4 接口 + §4.6 先写清切片 5 的归还与结算冷静期口径），原 §4/§5 降为 §5/§6，接口总数 24 → 28；`OrderStateIntegrationTest` 8 例，测试总数 93 → **101/101**；G3 18 条断言全过（承租方确认 3008、出租方三连动作、取用后取消 3001、租出中物品他人下单 3003、取消后日历释放、`scan-overdue` 返回 `{updated:1}` 且普通用户 1002）；④两处既有测试因用户真实下单变红，按"不改数据只改断言"修：`MapperIntegrationTest` 订单改按种子 `order_no` 计 3、占用改 `>= 3`；`ItemIntegrationTest` 日期筛选期望值改为「在架数 − 该窗口被占的在架数」；⑤口径备案：**结算冷静期（B 方案）**——归还生成 `settlement.status=PENDING_CONFIRM`，承租方 48h 内无异议转 `SETTLED`、提异议转 `DISPUTED` 并建 `appeal`、超时自动 `SETTLED`、管理端裁决转 `ADJUSTED`（窗口读 `sys_config` 的 `settlement.confirm.hours`），这是承租方对"出租方单方认定损耗"的对价手段 |
+| 2026-11-20 | 项目负责人 | **v1.17（切片 5 结算 K3 + 冷静期 + 信誉 K4）**：①新增 **§8.5 结算与冷静期规范**——归还必须「算逾期费 → 算损耗 → 生成结算单 → 四条流水 → 订单 `COMPLETED` → 删占用 → 信誉落账」原子完成；**金额公式只能来自 `FeeCalculator`**（业务代码禁止出现 `×0.5`、`×1.0` 这类字面量）；冷静期四态 `PENDING_CONFIRM / SETTLED / DISPUTED / ADJUSTED` 与四个出口（承租方无异议 / 提异议 / 超时自动 / 管理端裁决），`confirm_deadline` 只能后端算（读 `sys_config` 的 `settlement.confirm.hours`），**只有承租方能确认或提异议**；`credit_log` 靠 `uk_credit_biz(user_id, order_id, reason_code)` 幂等且正向加分受 `reward_daily_cap` 日封顶；②`credit_log.change` 是 MySQL 保留字，实体字段必须写 `@TableField("`change`")`（在 Wrapper 里写列名绕不过去，会拼出 `SELECT change FROM credit_log` 语法错）；③`settlement` 扩表：`status` 四态 + `confirm_deadline` / `confirmed_at` / `disputed_at`，`settled_at` 只在结清时写，新增 `KEY idx_settle_confirm_deadline (status, confirm_deadline)` 供冷静期扫描；④新增错误码 `SETTLEMENT_NOT_FOUND(3010)` / `APPEAL_NOT_FOUND(3011)`；⑤配套实现：`FeeCalculator`（纯静态，含逾期阶梯与损耗权重）、`LossService`（写 `loss_log` 并把 `item.loss_value` / `item.status` 落回）、`CreditService`（幂等 + 封顶 + clamp `[0,100]`）、`SettlementService`（return / detail / confirm / dispute / scanConfirmTimeout）、`AppealService`（列表 + 裁决 → 通过 `ADJUSTED` 免损耗、驳回 `SETTLED`）、`SettlementScanJob`（`settlement.scan.cron` 缺省 `0 5 * * * ?`）、`OrderStateServiceImpl.cancel` 对已确认订单扣 `CANCEL_AFTER_CONFIRM -3`；`SettlementIntegrationTest` 10 例，测试总数 101 → **111/111**；`03-verify.sql` 新增 A20–A23 共 **23 项全 PASS**；G3 报文联调 **26 条断言全过**（含出租方视角 `canConfirm=false`、裁决通过退 50.00、重复裁决 3009）；前端新增 `settlement` / `credit` 两个页面、`OrderDetailView` 归还弹窗、管理端 `AppealView` 与概览冷静期扫描按钮，两端 build 通过 |

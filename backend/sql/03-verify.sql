@@ -127,6 +127,30 @@ LEFT JOIN community c ON c.id = u.community_id
 WHERE u.community_id IS NOT NULL AND c.id IS NULL;
 
 -- 参考信息：各表行数
+-- A20 结算单状态只能是冷静期四态（PENDING_CONFIRM / SETTLED / DISPUTED / ADJUSTED）
+SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A20_settlement_status_whitelist`, IFNULL(GROUP_CONCAT(id), '-') AS `bad_rows`
+FROM settlement
+WHERE status NOT IN ('PENDING_CONFIRM', 'SETTLED', 'DISPUTED', 'ADJUSTED');
+
+-- A21 冷静期字段与状态必须自洽
+--   PENDING_CONFIRM / DISPUTED 必须有 confirm_deadline（否则永远扫不到超时）
+--   SETTLED / ADJUSTED 必须有 settled_at（否则"什么时候结清的"无从追溯）
+SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A21_settlement_confirm_fields`, IFNULL(GROUP_CONCAT(id), '-') AS `bad_rows`
+FROM settlement
+WHERE (status IN ('PENDING_CONFIRM', 'DISPUTED') AND confirm_deadline IS NULL)
+   OR (status IN ('SETTLED', 'ADJUSTED') AND settled_at IS NULL);
+
+-- A22 信誉流水的前值/后值必须与变动值自洽，且落在 [0,100]
+SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A22_credit_log_consistent`, IFNULL(GROUP_CONCAT(id), '-') AS `bad_rows`
+FROM credit_log
+WHERE after_score <> LEAST(100, GREATEST(0, before_score + `change`));
+
+-- A23 归还后订单转 COMPLETED 时不得残留占用（否则那几天永久占死）
+SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A23_terminal_order_no_occupancy`, IFNULL(GROUP_CONCAT(o.order_id), '-') AS `bad_rows`
+FROM order_occupancy o
+JOIN rental_order r ON r.id = o.order_id
+WHERE r.status IN ('COMPLETED', 'CANCELLED');
+
 SELECT 'user' AS tbl, COUNT(*) AS rows_cnt FROM `user`
 UNION ALL SELECT 'role', COUNT(*) FROM `role`
 UNION ALL SELECT 'community', COUNT(*) FROM `community`
@@ -139,5 +163,6 @@ UNION ALL SELECT 'settlement', COUNT(*) FROM `settlement`
 UNION ALL SELECT 'fee_flow', COUNT(*) FROM `fee_flow`
 UNION ALL SELECT 'credit_log', COUNT(*) FROM `credit_log`
 UNION ALL SELECT 'loss_log', COUNT(*) FROM `loss_log`
+UNION ALL SELECT 'appeal', COUNT(*) FROM `appeal`
 UNION ALL SELECT 'message', COUNT(*) FROM `message`
 UNION ALL SELECT 'sys_config', COUNT(*) FROM `sys_config`;

@@ -24,14 +24,19 @@
     </el-row>
 
     <div class="block">
-      <h3>逾期扫描</h3>
+      <h3>扫描任务（答辩演示用，不等定时任务）</h3>
       <p class="muted">
-        答辩演示用的「立即执行逾期扫描」：点一下就把「已过归还日但仍使用中」的订单置为 OVERDUE，
-        不用等定时任务（定时任务读 <code>sys_config['order.scan.cron']</code>，两者调用同一个方法）。
+        两个按钮各自调用与定时任务<b>同一个后端方法</b>，不存在两套逻辑：
+        逾期扫描把「已过归还日但仍使用中」的订单置为 OVERDUE；
+        冷静期扫描把「超过 48 小时未表态」的结算单自动确认。
       </p>
       <div class="scan-row">
         <el-button type="primary" :loading="scanning" @click="runScan">立即执行逾期扫描</el-button>
         <span v-if="scanText" class="muted">{{ scanText }}</span>
+      </div>
+      <div class="scan-row">
+        <el-button type="primary" plain :loading="settling" @click="runSettleScan">立即执行冷静期扫描</el-button>
+        <span v-if="settleText" class="muted">{{ settleText }}</span>
       </div>
     </div>
 
@@ -62,23 +67,27 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { listAdminItems } from '@/api/item'
+import { listAppeals } from '@/api/appeal'
 import request from '@/api/request'
 
 const scanning = ref(false)
 const scanText = ref('')
+const settling = ref(false)
+const settleText = ref('')
 
 // 只有"已经有接口"的数字才照亮，其余保持「—」，绝不放假数据（项目进度.md §3.1）
 const cards = ref([
   { name: '待审核物品', value: '—', ready: false, to: '/audit' },
   { name: '在架物品', value: '—', ready: false, to: '/audit' },
-  { name: '进行中订单', value: '—', ready: false, to: null },
+  { name: '待裁决申诉', value: '—', ready: false, to: '/appeals' },
   { name: '逾期订单', value: '—', ready: false, to: null }
 ])
 
 const modules = [
   { name: '物品审核', desc: '待审核列表 + 通过/驳回（驳回必须写原因）+ 详情抽屉', slice: '切片 2', ready: true, to: '/audit' },
-  { name: '订单与逾期扫描', desc: '状态流转已通（确认/取用/取消），管理端可立即执行逾期扫描', slice: '切片 4', ready: true, to: null },
-  { name: '申诉处理', desc: '申诉列表、裁定、信誉回滚', slice: '切片 5', ready: false, to: null },
+  { name: '订单与逾期扫描', desc: '状态流转已通（确认/取用/取消/归还），管理端可立即执行逾期扫描', slice: '切片 4', ready: true, to: null },
+  { name: '申诉裁决', desc: '申诉列表 + 证据图 + 裁决（支持则免损耗费并转 ADJUSTED，驳回则结清）', slice: '切片 5', ready: true, to: '/appeals' },
+  { name: '结算冷静期扫描', desc: '超时未表态的结算单自动确认，按钮在本页「扫描任务」里', slice: '切片 5', ready: true, to: null },
   { name: '参数配置', desc: '信誉/费用/损耗策略读写 + 立即生效刷新', slice: '切片 6', ready: false, to: null },
   { name: '数据看板', desc: 'ECharts 图表（需后端统计接口）', slice: '切片 6', ready: false, to: null }
 ]
@@ -99,7 +108,24 @@ async function runScan() {
   }
 }
 
-onMounted(async () => {  try {
+/** 手动触发冷静期超时扫描：结算单 PENDING_CONFIRM 超过 confirm_deadline 的自动转 SETTLED */
+async function runSettleScan() {
+  settling.value = true
+  try {
+    const result = await request.post('/admin/settlements/scan-confirm')
+    settleText.value = result.updated > 0
+      ? `本次 ${result.updated} 张结算单自动确认（${result.scannedAt}）`
+      : `扫描完成：没有超时未确认的结算单（${result.scannedAt}）`
+    ElMessage.success(settleText.value)
+  } catch {
+    // 同上
+  } finally {
+    settling.value = false
+  }
+}
+
+onMounted(async () => {
+  try {
     const pending = await listAdminItems({ status: 'PENDING', pageNum: 1, pageSize: 1 })
     cards.value[0].value = String(pending.total ?? 0)
     cards.value[0].ready = true
@@ -110,6 +136,13 @@ onMounted(async () => {  try {
     const page = await request.get('/items', { params: { pageNum: 1, pageSize: 1 } })
     cards.value[1].value = String(page.total ?? 0)
     cards.value[1].ready = true
+  } catch (e) {
+    // 同上
+  }
+  try {
+    const appeals = await listAppeals({ status: 'PENDING', pageNum: 1, pageSize: 1 })
+    cards.value[2].value = String(appeals.total ?? 0)
+    cards.value[2].ready = true
   } catch (e) {
     // 同上
   }
