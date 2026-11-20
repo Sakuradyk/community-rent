@@ -27,6 +27,8 @@ public record AppealItemVO(
         BigDecimal lossFee,
         BigDecimal refundDeposit,
         String verdict,
+        String verdictType,
+        String verdictTypeLabel,
         LocalDateTime verdictTime,
         LocalDateTime createdAt
 ) {

@@ -1,6 +1,7 @@
 package com.duyikang.rental.mapper;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.duyikang.rental.module.appeal.mapper.AppealMapper;
@@ -104,12 +105,16 @@ class MapperIntegrationTest {
         assertThat(rentalOrderMapper.selectCount(new QueryWrapper<com.duyikang.rental.module.order.entity.RentalOrder>()
                 .in("order_no", List.of("R202610050001", "R202611200001", "R202611250001")))).isEqualTo(3L);
         assertThat(orderOccupancyMapper.selectCount(null)).isGreaterThanOrEqualTo(3L);
-        assertThat(settlementMapper.selectCount(null)).isEqualTo(1L);
-        assertThat(feeFlowMapper.selectCount(null)).isEqualTo(4L);
-        assertThat(creditLogMapper.selectCount(null)).isEqualTo(2L);
-        assertThat(lossLogMapper.selectCount(null)).isEqualTo(1L);
-        // 无申诉种子数据：0 行同样证明映射正常（"0 行"和"表名写错"是两回事）
-        assertThat(appealMapper.selectCount(null)).isEqualTo(0L);
+        // 结算/流水/信誉/损耗/申诉同样会随真实使用增长（用户在浏览器里归还、提请异议），这里只锁「种子那一单」在
+        assertThat(settlementMapper.selectCount(new QueryWrapper<com.duyikang.rental.module.settlement.entity.Settlement>()
+                .likeRight("settle_no", "S20261008"))).isEqualTo(1L);
+        assertThat(feeFlowMapper.selectCount(null)).isGreaterThanOrEqualTo(4L);
+        assertThat(creditLogMapper.selectCount(null)).isGreaterThanOrEqualTo(2L);
+        assertThat(lossLogMapper.selectCount(null)).isGreaterThanOrEqualTo(1L);
+        // 申诉表没有种子数据：用一个必然查不到的条件断言「能查、能映射、返回 0 行」
+        // （"0 行"和"表名/字段名写错"是两回事，用不存在的主键查才既有意义又不随真实数据变化）
+        assertThat(appealMapper.selectCount(Wrappers.<com.duyikang.rental.module.appeal.entity.Appeal>lambdaQuery()
+                .eq(com.duyikang.rental.module.appeal.entity.Appeal::getOrderId, -1L))).isZero();
         assertThat(messageMapper.selectCount(null)).isEqualTo(2L);
         assertThat(creditPolicyMapper.selectCount(null)).isEqualTo(1L);
         assertThat(feePolicyMapper.selectCount(null)).isEqualTo(1L);

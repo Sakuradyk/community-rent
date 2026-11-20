@@ -162,6 +162,14 @@ WHERE (r.status IN ('PENDING', 'CONFIRMED') AND r.return_requested_at IS NOT NUL
        AND (r.return_requested_state IS NULL
             OR r.return_requested_state NOT IN ('INTACT', 'WORN', 'DAMAGED')));
 
+-- A25 申诉裁决必须留下裁定类型
+--   双方都能申诉，「支持」对双方方向相反，所以裁定必须能区分是谁的主张成立（不能用布尔）
+SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS `A25_verdict_type_present`, IFNULL(GROUP_CONCAT(a.id), '-') AS `bad_appeals`
+FROM appeal a
+WHERE a.status IN ('ACCEPTED', 'REJECTED')
+  AND (a.verdict_type IS NULL
+       OR a.verdict_type NOT IN ('RENTER_WIN', 'OWNER_WIN', 'PARTIAL', 'REJECTED'));
+
 SELECT 'user' AS tbl, COUNT(*) AS rows_cnt FROM `user`
 UNION ALL SELECT 'role', COUNT(*) FROM `role`
 UNION ALL SELECT 'community', COUNT(*) FROM `community`

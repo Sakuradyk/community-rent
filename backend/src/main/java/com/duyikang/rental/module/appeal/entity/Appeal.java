@@ -56,6 +56,12 @@ public class Appeal {
     private String verdict;
 
     /**
+     * 裁定类型：RENTER_WIN / OWNER_WIN / PARTIAL / REJECTED（见 VerdictType）。
+     * 比布尔 accepted 多出来的信息是<b>谁的主张成立</b>——双方都能申诉，方向相反。
+     */
+    private String verdictType;
+
+    /**
      * 裁决人
      */
     @JsonSerialize(using = ToStringSerializer.class)

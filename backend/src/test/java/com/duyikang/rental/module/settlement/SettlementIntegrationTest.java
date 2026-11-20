@@ -3,10 +3,13 @@ package com.duyikang.rental.module.settlement;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.duyikang.rental.common.constant.ErrorCode;
 import com.duyikang.rental.common.exception.BizException;
+import com.duyikang.rental.common.constant.VerdictType;
 import com.duyikang.rental.module.appeal.dto.AppealVerdictDTO;
 import com.duyikang.rental.module.appeal.entity.Appeal;
 import com.duyikang.rental.module.appeal.mapper.AppealMapper;
 import com.duyikang.rental.module.appeal.service.AppealService;
+import com.duyikang.rental.module.credit.entity.CreditPolicy;
+import com.duyikang.rental.module.credit.mapper.CreditPolicyMapper;
 import com.duyikang.rental.module.credit.entity.CreditLog;
 import com.duyikang.rental.module.credit.mapper.CreditLogMapper;
 import com.duyikang.rental.module.item.entity.Item;
@@ -25,6 +28,7 @@ import com.duyikang.rental.module.settlement.service.SettlementService;
 import com.duyikang.rental.module.settlement.vo.SettlementDetailVO;
 import com.duyikang.rental.security.LoginUser;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,11 +71,17 @@ class SettlementIntegrationTest {
 
     private static final String ON_TIME = "ON_TIME";
 
+    /** credit_policy 是单行策略表，主键固定 1（字段类型是 Integer）。 */
+    private static final Integer POLICY_ID_INT = 1;
+
     @Autowired
     private SettlementService settlementService;
 
     @Autowired
     private AppealService appealService;
+
+    @Autowired
+    private CreditPolicyMapper creditPolicyMapper;
 
     @Autowired
     private RentalOrderMapper rentalOrderMapper;
@@ -94,6 +104,18 @@ class SettlementIntegrationTest {
     @Autowired
     private AppealMapper appealMapper;
 
+    /**
+     * 把当日加分上限抬高：CreditService 的正向变动受 reward_daily_cap（默认 +4）约束，
+     * 而库里真实使用过的账号"今天已经加过 4 分"，会把测试里的 +2 / +10 直接吞掉（表现为一条流水都没有）。
+     * 事务回滚后策略值恢复原样，不改数据库真实配置。
+     */
+    @BeforeEach
+    void raiseCreditDailyCap() {
+        CreditPolicy policy = new CreditPolicy();
+        policy.setId(POLICY_ID_INT);
+        policy.setRewardDailyCap(200);
+        creditPolicyMapper.updateById(policy);
+    }
     @AfterEach
     void clearContext() {
         SecurityContextHolder.clearContext();
@@ -314,11 +336,12 @@ class SettlementIntegrationTest {
 
         Appeal appeal = appealMapper.selectOne(Wrappers.<Appeal>lambdaQuery().eq(Appeal::getOrderId, orderId));
         loginAs(1L, "平台管理员", "ADMIN");
-        appealService.verdict(appeal.getId(), new AppealVerdictDTO(true, "确有旧裂痕，损耗费免除"));
+        appealService.verdict(appeal.getId(), new AppealVerdictDTO(VerdictType.RENTER_WIN, null, null, "确有旧裂痕，损耗费免除"));
 
         Appeal after = appealMapper.selectById(appeal.getId());
         assertThat(after.getStatus()).isEqualTo("ACCEPTED");
         assertThat(after.getAdminId()).isEqualTo(1L);
+        assertThat(after.getVerdictType()).isEqualTo(VerdictType.RENTER_WIN);
 
         Settlement settlement = settlementMapper.selectById(vo.id());
         assertThat(settlement.getStatus()).isEqualTo("ADJUSTED");
@@ -327,7 +350,7 @@ class SettlementIntegrationTest {
         assertThat(settlement.getRefundDeposit()).isEqualByComparingTo("30.00");
 
         loginAs(STRANGER, "王强", "USER");
-        assertThatThrownBy(() -> appealService.verdict(appeal.getId(), new AppealVerdictDTO(false, "重复裁决")))
+        assertThatThrownBy(() -> appealService.verdict(appeal.getId(), new AppealVerdictDTO(VerdictType.REJECTED, null, null, "重复裁决")))
                 .isInstanceOfSatisfying(BizException.class,
                         e -> assertThat(e.getCode()).isEqualTo(ErrorCode.APPEAL_STATE_INVALID.getCode()));
     }
