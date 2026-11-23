@@ -1,11 +1,12 @@
 <template>
   <div>
-    <h2 class="title">概览</h2>
+    <h2 class="title">数据看板</h2>
     <p class="muted">
-      数字只显示接口真能给的：已有接口的照明数字并标「已接入」，还没有接口的显示「—」并标「待接入」，不放假数据。
+      数字全部来自 <code>/api/admin/stats</code>（后端实时聚合，不是缓存快照）；
+      GMV 只统计已完成订单的租金，不含押金。
     </p>
 
-    <el-row :gutter="16" class="cards">
+    <el-row :gutter="16" class="cards" v-loading="loading">
       <el-col :span="6" v-for="c in cards" :key="c.name">
         <component
           :is="c.to ? 'router-link' : 'div'"
@@ -15,47 +16,65 @@
         >
           <div class="stat-name muted">{{ c.name }}</div>
           <div class="stat-value">{{ c.value }}</div>
-          <el-tag size="small" :type="c.ready ? 'success' : 'info'">
-            {{ c.ready ? '已接入' : '待接入' }}
-          </el-tag>
-          <span v-if="c.to" class="stat-link">去处理 →</span>
+          <div class="stat-sub muted">{{ c.sub }}</div>
         </component>
       </el-col>
     </el-row>
 
-    <div class="block">
-      <h3>扫描任务（答辩演示用，不等定时任务）</h3>
-      <p class="muted">
-        两个按钮各自调用与定时任务<b>同一个后端方法</b>，不存在两套逻辑：
-        逾期扫描把「已过归还日但仍使用中」的订单置为 OVERDUE；
-        冷静期扫描把「超过 48 小时未表态」的结算单自动确认。
-      </p>
-      <div class="scan-row">
-        <el-button type="primary" :loading="scanning" @click="runScan">立即执行逾期扫描</el-button>
-        <span v-if="scanText" class="muted">{{ scanText }}</span>
+    <div class="charts">
+      <div class="chart-card">
+        <header class="chart-head">
+          <h3>订单与成交趋势</h3>
+          <el-radio-group v-model="days" size="small" @change="loadTrend">
+            <el-radio-button :value="7">7 天</el-radio-button>
+            <el-radio-button :value="14">14 天</el-radio-button>
+            <el-radio-button :value="30">30 天</el-radio-button>
+          </el-radio-group>
+        </header>
+        <div ref="trendRef" class="chart"></div>
       </div>
-      <div class="scan-row">
-        <el-button type="primary" plain :loading="settling" @click="runSettleScan">立即执行冷静期扫描</el-button>
-        <span v-if="settleText" class="muted">{{ settleText }}</span>
+
+      <div class="chart-card">
+        <header class="chart-head">
+          <h3>订单状态分布</h3>
+          <span class="muted">共 {{ overview.orderTotal }} 单</span>
+        </header>
+        <div ref="pieRef" class="chart"></div>
       </div>
     </div>
 
     <div class="block">
-      <h3>管理端工作台进度</h3>
+      <h3>扫描任务（答辩演示用，不等定时任务到点）</h3>
+      <p class="muted">
+        三个按钮各自调用与定时任务<b>同一个后端方法</b>，不存在两套逻辑：
+        逾期扫描把「已过归还日但仍使用中」的订单置为已逾期；
+        冷静期扫描把「超过 48 小时未表态」的结算单自动确认；
+        归还超时扫描把「承租方已申报归还、出租方超 24 小时未验收」的订单按申报自动结算。
+      </p>
+      <div class="scan-row">
+        <el-button type="primary" :loading="scanning" @click="runScan('/admin/orders/scan-overdue', '逾期')">
+          立即执行逾期扫描
+        </el-button>
+        <el-button type="primary" plain :loading="settling" @click="runScan('/admin/settlements/scan-confirm', '结算冷静期')">
+          立即执行冷静期扫描
+        </el-button>
+        <el-button type="primary" plain :loading="returning" @click="runScan('/admin/orders/scan-return', '归还超时')">
+          立即执行归还超时扫描
+        </el-button>
+      </div>
+      <p v-if="scanText" class="muted">{{ scanText }}</p>
+    </div>
+
+    <div class="block">
+      <h3>管理端功能</h3>
       <el-table :data="modules" size="small">
         <el-table-column prop="name" label="模块" width="160" />
         <el-table-column prop="desc" label="内容" />
         <el-table-column prop="slice" label="切片" width="100" />
-        <el-table-column label="状态" width="110">
-          <template #default="{ row }">
-            <el-tag v-if="row.ready" size="small" type="success">已可用</el-tag>
-            <el-tag v-else size="small" type="info">待开发</el-tag>
-          </template>
-        </el-table-column>
         <el-table-column label="入口" width="100">
           <template #default="{ row }">
             <router-link v-if="row.to" :to="row.to">打开</router-link>
-            <span v-else class="muted">—</span>
+            <span v-else class="muted">本页</span>
           </template>
         </el-table-column>
       </el-table>
@@ -64,139 +83,286 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { listAdminItems } from '@/api/item'
-import { listAppeals } from '@/api/appeal'
+import * as echarts from 'echarts'
+import { getOverview, getTrend } from '@/api/stats'
 import request from '@/api/request'
 
-const scanning = ref(false)
-const scanText = ref('')
-const settling = ref(false)
-const settleText = ref('')
-
-// 只有"已经有接口"的数字才照亮，其余保持「—」，绝不放假数据（项目进度.md §3.1）
+const loading = ref(false)
+const days = ref(7)
+const overview = ref({})
 const cards = ref([
-  { name: '待审核物品', value: '—', ready: false, to: '/audit' },
-  { name: '在架物品', value: '—', ready: false, to: '/audit' },
-  { name: '待裁决申诉', value: '—', ready: false, to: '/appeals' },
-  { name: '逾期订单', value: '—', ready: false, to: null }
+  { name: '待审核物品', value: '—', sub: '需要人工过一遍', to: '/audit' },
+  { name: '进行中订单', value: '—', sub: '已确认 / 使用中 / 已逾期', to: null },
+  { name: '待裁决申诉', value: '—', sub: '结算纠纷', to: '/appeals' },
+  { name: '待确认结算', value: '—', sub: '冷静期内', to: null }
 ])
 
+const scanning = ref(false)
+const settling = ref(false)
+const returning = ref(false)
+const scanText = ref('')
+
 const modules = [
-  { name: '物品审核', desc: '待审核列表 + 通过/驳回（驳回必须写原因）+ 详情抽屉', slice: '切片 2', ready: true, to: '/audit' },
-  { name: '订单与逾期扫描', desc: '状态流转已通（确认/取用/取消/归还），管理端可立即执行逾期扫描', slice: '切片 4', ready: true, to: null },
-  { name: '申诉裁决', desc: '申诉列表 + 证据图 + 裁决（支持则免损耗费并转 ADJUSTED，驳回则结清）', slice: '切片 5', ready: true, to: '/appeals' },
-  { name: '结算冷静期扫描', desc: '超时未表态的结算单自动确认，按钮在本页「扫描任务」里', slice: '切片 5', ready: true, to: null },
-  { name: '参数配置', desc: '信誉/费用/损耗策略读写 + 立即生效刷新', slice: '切片 6', ready: false, to: null },
-  { name: '数据看板', desc: 'ECharts 图表（需后端统计接口）', slice: '切片 6', ready: false, to: null }
+  { name: '物品审核', desc: '待审核列表 + 通过/驳回（驳回必须写原因）+ 详情抽屉', slice: '切片 2', to: '/audit' },
+  { name: '申诉裁决', desc: '四档裁定（支持承租方 / 支持出租方 / 部分支持 / 驳回）+ 证据图', slice: '切片 5', to: '/appeals' },
+  { name: '参数配置', desc: '信誉/费用/损耗三张策略表 + sys_config 键值，保存即生效（后端不缓存）', slice: '切片 6', to: '/config' },
+  { name: '扫描任务', desc: '逾期 / 结算冷静期 / 归还超时三个扫描，本页可直接触发', slice: '切片 4–5', to: null }
 ]
 
-/** 手动触发逾期扫描：与定时任务调用同一个后端方法，不存在两套逻辑 */
-async function runScan() {
-  scanning.value = true
+const trendRef = ref(null)
+const pieRef = ref(null)
+let trendChart = null
+let pieChart = null
+
+const STATUS_LABELS = {
+  PENDING: '待确认',
+  CONFIRMED: '已确认',
+  IN_USE: '使用中',
+  OVERDUE: '已逾期',
+  COMPLETED: '已完成',
+  CANCELLED: '已取消'
+}
+
+async function loadOverview() {
+  loading.value = true
   try {
-    const result = await request.post('/admin/orders/scan-overdue')
-    scanText.value = result.updated > 0
-      ? `本次 ${result.updated} 单转为「已逾期」（${result.scannedAt}）`
-      : `扫描完成：没有需要转换的订单（${result.scannedAt}）`
-    ElMessage.success(scanText.value)
+    const data = await getOverview()
+    overview.value = data
+    cards.value = [
+      { name: '待审核物品', value: data.itemPendingAudit, sub: `在架 ${data.itemOnShelf} / 共 ${data.itemTotal}`, to: '/audit' },
+      {
+        name: '进行中订单',
+        value: data.orderConfirmed + data.orderInUse + data.orderOverdue,
+        sub: `已确认 ${data.orderConfirmed} · 使用中 ${data.orderInUse} · 逾期 ${data.orderOverdue}`,
+        to: null
+      },
+      { name: '待裁决申诉', value: data.appealPending, sub: '结算纠纷', to: '/appeals' },
+      {
+        name: '待确认结算',
+        value: data.settlementPendingConfirm,
+        sub: `GMV ¥${data.gmvTotal}（近 30 天 ¥${data.gmvIn30Days}）`,
+        to: null
+      }
+    ]
+    renderPie(data)
   } catch {
     // 提示已由 request.js 统一弹出
   } finally {
-    scanning.value = false
+    loading.value = false
   }
 }
 
-/** 手动触发冷静期超时扫描：结算单 PENDING_CONFIRM 超过 confirm_deadline 的自动转 SETTLED */
-async function runSettleScan() {
-  settling.value = true
+async function loadTrend() {
   try {
-    const result = await request.post('/admin/settlements/scan-confirm')
-    settleText.value = result.updated > 0
-      ? `本次 ${result.updated} 张结算单自动确认（${result.scannedAt}）`
-      : `扫描完成：没有超时未确认的结算单（${result.scannedAt}）`
-    ElMessage.success(settleText.value)
+    const data = await getTrend(days.value)
+    renderTrend(data.points || [])
   } catch {
     // 同上
-  } finally {
-    settling.value = false
   }
+}
+
+function renderTrend(points) {
+  if (!trendChart) return
+  const dates = points.map((p) => p.date.slice(5))
+  trendChart.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['订单数', '成交额'], right: 0 },
+    grid: { left: 8, right: 8, top: 36, bottom: 4, containLabel: true },
+    xAxis: { type: 'category', data: dates, boundaryGap: false },
+    yAxis: [
+      { type: 'value', name: '单', minInterval: 1 },
+      { type: 'value', name: '元' }
+    ],
+    series: [
+      {
+        name: '订单数',
+        type: 'line',
+        smooth: true,
+        data: points.map((p) => p.orderCount),
+        itemStyle: { color: '#ea580c' },
+        areaStyle: { opacity: 0.12 }
+      },
+      {
+        name: '成交额',
+        type: 'bar',
+        yAxisIndex: 1,
+        data: points.map((p) => p.gmv),
+        itemStyle: { color: '#f8cda8' },
+        barMaxWidth: 18
+      }
+    ]
+  })
+}
+
+function renderPie(data) {
+  if (!pieChart) return
+  const pairs = [
+    ['PENDING', data.orderPending],
+    ['CONFIRMED', data.orderConfirmed],
+    ['IN_USE', data.orderInUse],
+    ['OVERDUE', data.orderOverdue],
+    ['COMPLETED', data.orderCompleted],
+    ['CANCELLED', data.orderCancelled]
+  ].filter(([, value]) => value > 0)
+
+  pieChart.setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: {c} 单（{d}%）' },
+    legend: { bottom: 0, icon: 'circle' },
+    series: [
+      {
+        type: 'pie',
+        radius: ['42%', '66%'],
+        center: ['50%', '44%'],
+        avoidLabelOverlap: true,
+        label: { formatter: '{b}\n{c}' },
+        data: pairs.map(([status, value]) => ({ name: STATUS_LABELS[status] || status, value }))
+      }
+    ]
+  })
+}
+
+/**
+ * 手动触发扫描：三个扫描共用一套提示逻辑，只有 label 不同。
+ * 返回 `{ updated, scannedAt }`，`updated=0` 也要给"扫完了但没事可做"的反馈。
+ */
+async function runScan(path, label) {
+  const flag = path.includes('settlements') ? settling : path.includes('return') ? returning : scanning
+  flag.value = true
+  try {
+    const result = await request.post(path)
+    scanText.value = result.updated > 0
+      ? `${label}扫描：本次 ${result.updated} 条被处理（${result.scannedAt}）`
+      : `${label}扫描完成：没有需要处理的数据（${result.scannedAt}）`
+    ElMessage.success(scanText.value)
+    await loadOverview()
+  } catch {
+    // 提示已由 request.js 统一弹出
+  } finally {
+    flag.value = false
+  }
+}
+
+function handleResize() {
+  trendChart?.resize()
+  pieChart?.resize()
 }
 
 onMounted(async () => {
-  try {
-    const pending = await listAdminItems({ status: 'PENDING', pageNum: 1, pageSize: 1 })
-    cards.value[0].value = String(pending.total ?? 0)
-    cards.value[0].ready = true
-  } catch (e) {
-    // 提示已由 request.js 统一弹出；保持「—」比显示 0 更诚实
-  }
-  try {
-    const page = await request.get('/items', { params: { pageNum: 1, pageSize: 1 } })
-    cards.value[1].value = String(page.total ?? 0)
-    cards.value[1].ready = true
-  } catch (e) {
-    // 同上
-  }
-  try {
-    const appeals = await listAppeals({ status: 'PENDING', pageNum: 1, pageSize: 1 })
-    cards.value[2].value = String(appeals.total ?? 0)
-    cards.value[2].ready = true
-  } catch (e) {
-    // 同上
-  }
+  trendChart = echarts.init(trendRef.value)
+  pieChart = echarts.init(pieRef.value)
+  window.addEventListener('resize', handleResize)
+  await Promise.all([loadOverview(), loadTrend()])
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize)
+  trendChart?.dispose()
+  pieChart?.dispose()
+  trendChart = null
+  pieChart = null
 })
 </script>
 
-<style scoped lang="scss">
-@use '@/assets/styles/variables.scss' as *;
-
+<style scoped>
 .title {
-  margin: 0 0 $space-1;
+  margin: 0 0 4px;
+  font-size: 18px;
 }
+
+.muted {
+  color: #7a6a5d;
+  font-size: 13px;
+}
+
 .cards {
-  margin: $space-4 0;
+  margin: 16px 0;
 }
+
 .stat {
   display: block;
-  background: $color-surface;
-  border: 1px solid $color-border;
-  border-radius: $radius-base;
-  padding: $space-4;
-  color: inherit;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #efe4d8;
+  border-radius: 8px;
   text-decoration: none;
-  transition: border-color 0.2s;
+  color: inherit;
+}
 
-  &.clickable:hover {
-    border-color: $color-primary;
+.stat.clickable:hover {
+  border-color: #ea580c;
+}
+
+.stat-name {
+  font-size: 13px;
+}
+
+.stat-value {
+  margin: 6px 0 4px;
+  font-size: 26px;
+  font-weight: 700;
+  color: #33261d;
+}
+
+.stat-sub {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 1100px) {
+  .charts {
+    grid-template-columns: 1fr;
   }
 }
-.stat-name {
-  margin-bottom: $space-2;
-  font-size: $font-size-sm;
+
+.chart-card {
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #efe4d8;
+  border-radius: 8px;
 }
-.stat-value {
-  font-size: $font-size-xl;
-  font-weight: 700;
-  margin-bottom: $space-2;
-}
-.stat-link {
-  margin-left: $space-2;
-  font-size: $font-size-xs;
-  color: $color-primary;
-}
-.block {
-  background: $color-surface;
-  border: 1px solid $color-border;
-  border-radius: $radius-base;
-  padding: $space-4;
-  margin-top: $space-4;
-}
-.scan-row {
+
+.chart-head {
   display: flex;
   align-items: center;
-  gap: $space-3;
-  margin-top: $space-2;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.chart-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.chart {
+  height: 260px;
+}
+
+.block {
+  padding: 16px;
+  margin-bottom: 16px;
+  background: #fff;
+  border: 1px solid #efe4d8;
+  border-radius: 8px;
+}
+
+.block h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.scan-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
 }
 </style>

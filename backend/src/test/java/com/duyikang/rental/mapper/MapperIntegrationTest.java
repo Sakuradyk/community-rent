@@ -146,7 +146,10 @@ class MapperIntegrationTest {
         // overdue_rate / loss_value 是 DECIMAL(6,4)：4 位小数必须原样保留
         assertThat(item.getOverdueRate()).isEqualByComparingTo("0.5000");
         assertThat(item.getOverdueRate().scale()).isEqualTo(4);
-        assertThat(item.getLossValue()).isEqualByComparingTo("0.1200");
+        // loss_value 会随真实归还/裁决变化（用户借还一次就 +0.0004），所以只锁"精度与值域"，
+        // 不锁具体数值 —— 见项目进度.md 坑 53：用户造得出来的数据不做等值断言。
+        assertThat(item.getLossValue()).isBetween(new java.math.BigDecimal("0.0000"),
+                new java.math.BigDecimal("1.0000"));
         assertThat(item.getLossValue().scale()).isEqualTo(4);
 
         Item second = itemMapper.selectById(2L);

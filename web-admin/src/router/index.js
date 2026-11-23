@@ -30,6 +30,12 @@ const routes = [
         name: 'appeals',
         component: () => import('@/views/appeal/AppealView.vue'),
         meta: { title: '申诉裁决', requiresAdmin: true }
+      },
+      {
+        path: 'config',
+        name: 'config',
+        component: () => import('@/views/config/ConfigView.vue'),
+        meta: { title: '参数配置', requiresAdmin: true }
       }
     ]
   },

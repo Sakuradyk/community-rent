@@ -12,7 +12,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.18 · 2026-11-20 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
+> **版本**：v1.20 · 2026-11-23 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
 
 ---
 
@@ -796,6 +796,19 @@ int rows = rentalOrderMapper.update(null, Wrappers.<RentalOrder>lambdaUpdate()
 | 幂等与状态 | 申诉必须是 `PENDING` 才能裁决（否则 3009）；裁决写 `verdict_type / admin_id / verdict_time`；`ACCEPTED` 的文案是「已裁决」而不是「已支持承租方」 |
 | 禁止 | 把 `accepted = true` 无条件解释成"免损耗"；直接 `UPDATE settlement SET refund_deposit` 而不写冲正流水；用 `creditAdjust` 改写历史 `credit_log` 行 |
 
+### 8.7 推荐与统计规范（M5 / 管理端看板，**权重只能来自配置**）
+
+| 规定 | 内容 |
+| :-- | :-- |
+| 权重来源 | `recommend.w.cf` / `recommend.w.content` / `recommend.w.heat` / `recommend.decay.half_life` / `recommend.heat.window` / `recommend.top_n` 全部读 `sys_config`，代码里只允许"缺键兜底常量"（并 `log.warn`），**禁止**把 0.6/0.3/0.1 写成业务字面量 |
+| 可解释 | 每条推荐结果必须带 `reasonCode`（`CF` / `CONTENT` / `HEAT` / `COLD_START`）与后端拼好的 `reason` 文案。**文案只在后端拼**，前端只负责展示 —— 同一句话两处维护必然漂移 |
+| 候选与排除 | 候选只取 `status = ON_SHELF`、上限 200 条；排除「自己发布的」与「我正在租的」（`PENDING/CONFIRMED/IN_USE/OVERDUE`）。排除逻辑放在服务端，前端过滤等于把不该出现的物品先查出来再藏起来 |
+| 排序稳定 | `score DESC → rentCount DESC → id DESC`；分数相同必须有序，否则同一用户刷新两次顺序会跳，看起来像 bug |
+| 冷启动 | 匿名用户或零订单用户走 `COLD_START`（纯热度 + 同小区优先），且该分支**不许删** —— 它是 FR-M5-03 的验收点，也是新用户唯一能看到的推荐 |
+| 看板口径 | GMV 只算 `COMPLETED` 订单的 `rent_amount`（**不含押金**，押金是应退不是收入）；按天统计用服务器时区、空天补 0、末位是今天；趋势点数只由 `days`（1–30）决定 |
+| 参数读写 | 策略表只提交要改的字段（未提交的保持原值，防覆盖他人改动）；`sys_config` 只改已存在的键，按 `valueType` 校验；**不做配置缓存**，因此"保存即生效"是自然结果，不需要 `@RefreshScope` |
+| 禁止 | 前端自己算推荐理由或权重展示；把类目名/小区名写进 `constants.js` 当枚举（F16）；统计接口里放随机数或假数据 |
+
 ---
 
 ## 9. 配置外置规范（**不许硬编码**）
@@ -1009,3 +1022,4 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-20 | 项目负责人 | **v1.17（切片 5 结算 K3 + 冷静期 + 信誉 K4）**：①新增 **§8.5 结算与冷静期规范**——归还必须「算逾期费 → 算损耗 → 生成结算单 → 四条流水 → 订单 `COMPLETED` → 删占用 → 信誉落账」原子完成；**金额公式只能来自 `FeeCalculator`**（业务代码禁止出现 `×0.5`、`×1.0` 这类字面量）；冷静期四态 `PENDING_CONFIRM / SETTLED / DISPUTED / ADJUSTED` 与四个出口（承租方无异议 / 提异议 / 超时自动 / 管理端裁决），`confirm_deadline` 只能后端算（读 `sys_config` 的 `settlement.confirm.hours`），**只有承租方能确认或提异议**；`credit_log` 靠 `uk_credit_biz(user_id, order_id, reason_code)` 幂等且正向加分受 `reward_daily_cap` 日封顶；②`credit_log.change` 是 MySQL 保留字，实体字段必须写 `@TableField("`change`")`（在 Wrapper 里写列名绕不过去，会拼出 `SELECT change FROM credit_log` 语法错）；③`settlement` 扩表：`status` 四态 + `confirm_deadline` / `confirmed_at` / `disputed_at`，`settled_at` 只在结清时写，新增 `KEY idx_settle_confirm_deadline (status, confirm_deadline)` 供冷静期扫描；④新增错误码 `SETTLEMENT_NOT_FOUND(3010)` / `APPEAL_NOT_FOUND(3011)`；⑤配套实现：`FeeCalculator`（纯静态，含逾期阶梯与损耗权重）、`LossService`（写 `loss_log` 并把 `item.loss_value` / `item.status` 落回）、`CreditService`（幂等 + 封顶 + clamp `[0,100]`）、`SettlementService`（return / detail / confirm / dispute / scanConfirmTimeout）、`AppealService`（列表 + 裁决 → 通过 `ADJUSTED` 免损耗、驳回 `SETTLED`）、`SettlementScanJob`（`settlement.scan.cron` 缺省 `0 5 * * * ?`）、`OrderStateServiceImpl.cancel` 对已确认订单扣 `CANCEL_AFTER_CONFIRM -3`；`SettlementIntegrationTest` 10 例，测试总数 101 → **111/111**；`03-verify.sql` 新增 A20–A23 共 **23 项全 PASS**；G3 报文联调 **26 条断言全过**（含出租方视角 `canConfirm=false`、裁决通过退 50.00、重复裁决 3009）；前端新增 `settlement` / `credit` 两个页面、`OrderDetailView` 归还弹窗、管理端 `AppealView` 与概览冷静期扫描按钮，两端 build 通过 |
 | 2026-11-20 | 项目负责人 | **v1.18（归还申请：承租方申报 + 出租方验收 + 超时兜底，方案 B）**：①§8.5 新增「三之二 归还申请」——承租方 `POST /api/orders/{id}/return/request` 只写 `return_requested_at/by/state` 三列且**订单状态不变**、占用不释放；出租方验收以其成色结算；超过 `order.return.confirm.hours`（默认 24h）按承租方申报成色自动结算；超时扫描**每单一个独立事务**（`TransactionTemplate`），一单失败只记日志；出租方确认与自动结算共用 `doSettle(order, returnState, remark)`，金额只算一次。②异议权限由「仅承租方」放宽为「订单双方」（`requireParty`），`canConfirm` 仍只对承租方为真、`canDispute` 对双方为真。③`rental_order` 加三列 + `idx_order_return_request(status, return_requested_at)`；`sys_config` 加 `order.return.confirm.hours=24`；`03-verify.sql` 加 **A24**（PENDING/CONFIRMED 不得有申报时间、有申报必须有合法成色），实库 24 项全 PASS。④测试 111 → **117/117**（新增 6 例：申报落库且状态不变 / 出租方不能申报 3008 / 重复申报 3001 / 验收覆盖申报值 / 超时按申报成色自动结算 / 出租方可提异议）。⑤动机：堵住「承租方已归还、出租方拖着不确认」的单边死角（原来卡在 IN_USE、占用不释放、连申诉入口都没有） |
 | 2026-11-20 | 项目负责人 | **v1.19（裁决四档）**：新增 **§8.6 裁决规范**：申诉裁决由布尔 `accepted` 改为四档 `VerdictType`（`RENTER_WIN` / `OWNER_WIN` / `PARTIAL` / `REJECTED`），禁用布尔、金额变动必须追加 `ADJUST` 冲正流水、物品损耗按比例回滚、信誉用 `ADMIN_ADJUST` 回滚不改历史；`appeal.verdict_type`、`fee_flow.type` 加 `ADJUST`；测试 117 → 124、DB 断言 24 → 25（A25）；动机=双方都能申诉，"支持"方向相反，出租方胜诉时原逻辑把损耗费清零 |
+| 2026-11-23 | 项目负责人 | **v1.20（切片 6：推荐 + 看板 + 参数配置）**：新增 **§8.7 推荐与统计规范**（权重只读 `sys_config`、`reason` 只在后端拼、候选上限 200 与排除规则、排序稳定、冷启动分支不许删、GMV 口径不含押金、策略表只提交改动字段、配置不缓存故保存即生效、禁止假数据）；版本行从 v1.18 补正为 v1.20（v1.19 已落地但版本行漏改）；实测 142/142、33 条接口联调断言、两端 build 通过 |

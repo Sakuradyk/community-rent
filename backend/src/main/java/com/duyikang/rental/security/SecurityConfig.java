@@ -59,6 +59,9 @@ public class SecurityConfig {
                                 "/api/items",
                                 "/api/items/*",
                                 "/api/items/*/calendar").permitAll()
+                        // 推荐接口匿名可用：首页未登录也要有内容（此时后端走冷启动纯热度榜）。
+                        // 带 token 时由 CurrentUser.optional() 拿到个性化偏好，同一个 URL 两种结果。
+                        .requestMatchers(HttpMethod.GET, "/api/recommend").permitAll()
                         .requestMatchers(
                                 "/api/auth/login",
                                 "/api/auth/register",
