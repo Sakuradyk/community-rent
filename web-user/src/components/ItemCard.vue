@@ -81,24 +81,37 @@ const sameCommunity = computed(() => {
   font-size: $font-size-sm;
 }
 
-.badge-same {
-  top: auto;
-  bottom: $space-2;
-  left: $space-2;
-  background: rgba(255, 255, 255, 0.94);
-  color: $color-primary-deep;
-  border: 1px solid $color-primary-tint;
-  font-weight: 600;
-}
-
+// 徽标基类必须先写：变体只覆盖自己需要的属性，否则后写的 top/left 会把变体布局改回去
+// （曾经把 .badge-same 写在 .badge 前面，结果 top 与 bottom 同时生效 → 徽标被拉成竖长条）
 .badge {
   position: absolute;
   top: $space-2;
   left: $space-2;
-  padding: 2px $space-2;
-  border-radius: $radius-pill;
-  font-size: $font-size-xs;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 4px; // 小长方形，不抢图片的视觉
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
   color: #fff;
+}
+
+// 同小区：左上角，白底暖字，体积最小
+.badge-same {
+  background: rgba(255, 255, 255, 0.94);
+  color: $color-primary-deep;
+  border: 1px solid $color-primary-tint;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(120, 82, 45, 0.12);
+}
+
+// 「所选日期可租/已租出」靠右上角，避免和同小区徽标叠在一起
+.badge-ok,
+.badge-bad {
+  left: auto;
+  right: $space-2;
 }
 
 .badge-ok {
