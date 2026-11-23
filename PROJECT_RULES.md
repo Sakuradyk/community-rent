@@ -12,7 +12,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.23 · 2026-11-23 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
+> **版本**：v1.24 · 2026-11-23 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
 
 ---
 
@@ -850,12 +850,14 @@ int rows = rentalOrderMapper.update(null, Wrappers.<RentalOrder>lambdaUpdate()
 
 | 业务 | 分录 |
 | :-- | :-- |
-| 注册 | `PLATFORM → USER`，`amount = wallet.signup.balance`，`biz_type = SIGNUP` |
+| 模拟充值 | `PLATFORM → USER.cash`，`amount` 由用户选（≤ `wallet.recharge.max`），`biz_type = RECHARGE`；平台余额转为负数代表已发出的虚拟额度 |
 | 下单（`PENDING`） | `USER.cash → USER.frozen`，`amount = rent_amount + deposit_amount`，`biz_type = ORDER_FREEZE` |
 | 取消（`PENDING`/`CONFIRMED`） | `USER.frozen → USER.cash`，同额反向，`biz_type = ORDER_RELEASE` |
-| 结算 | `USER.frozen → USER.cash`（应退 D−O−L）、`USER.frozen → OWNER.cash`（R+O）、`USER.frozen → PLATFORM`（L），三条同 `biz_type = SETTLE`、同 `biz_id = settlementId` |
-| 裁决冲正 | 按 Δ 反向补一条，`biz_type = VERDICT` |
+| 结算 | `USER.frozen → USER.cash`（应退 D−O−L）、`USER.frozen → OWNER.cash`（**R + O + L**：租金、逾期费、损耗费都归物主），两条同 `biz_type = SETTLE`、同 `biz_id = settlementId`；平台不参与结算分成 |
+| 裁决冲正 | 按 Δ 在 `USER.cash` 与 `OWNER.cash` 之间反向补一条，`biz_type = VERDICT` |
 | 管理端调整 | `USER ↔ PLATFORM`，`biz_type = ADMIN_ADJUST` |
+
+**损耗费归属**：损耗是物主的资产损失，因此 `L` 计入物主（与 `O` 同理）；平台只在模拟充值与调整时作记账对手方，**不参与结算分成**，答辩口径为「平台不抽成，只做撮合与约束」。
 
 **禁止项**：①前端传金额或余额 ②先扣钱后建单（两张表不同事务）③用 `fee_flow` 代替分录 ④在 `account_entry` 上做物理删除 ⑤把虚拟余额当作真实资金对外承诺（充值/提现一律不做，见需求总结 §10.2）
 ## 9. 配置外置规范（**不许硬编码**）
@@ -1073,3 +1075,4 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-23 | 新增 **§8.8 消息通知规范**（业务侧只调 `notify`、失败只 warn 不阻断、只在状态变更成功后写、`type` 与 `bizType` 两组常量不许合并、只能读写自己的消息、单条已读幂等、未读数复用 `idx_msg_user_read`、不做实时推送）+ 版本升 v1.21：站内消息落地（订单创建/确认/取用/取消、归还申报/结算生成/异议、审核结果、裁决结果共 9 处通知），测试 142 → 149，接口 44 → 48 |
 | 2026-11-23 | 项目负责人 | **v1.22（证据固化 + K6 可视化）**：§15 索引更新——`docs/测试用例.md` 由「边开发边填」升级为**验收证据中心**（三条硬指标→证据位置、K2 并发断言口径与复现命令、按用户动作排列的 8 组用例、推荐四组消融结果、12 步答辩演示脚本、提交前回归清单），`docs/数据库设计.md` 表数保持 19（核对后未变），`docs/notes` 注明 M5 评估笔记；配套实绩：K2 并发证据固化（149/149 + 50 线程的结果、口径、命令进文档）、首页/卡片「同小区」徽标（纯展示，排序仍由后端 SQL 决定）、K6 损耗可视化（物品详情损耗进度条 + 0.6/0.85 两条阈值说明 + 我的物品列表损耗列，`MyItemVO` 增 `lossValue`） |
 | 2026-11-23 | 项目负责人 | **v1.23（账务）**：新增 §8.9 账务规范——账户模型（USER 懒创建 / PLATFORM 固定 `owner_id=0`）、两个余额、十条记账铁律（复式 M1、守恒 M2、幂等 M3、同事务 M4、快照 M5、乐观锁 M6、只追加 M7、精度 M8、权限 M9、状态机不动 M10）、资金流向表（注册/下单/取消/结算/裁决/调整）、五条禁止项。配套：需求总结 §4.3 增 FR-M3-10~13、§5 增 `wallet.signup.balance`、§7.1 增两张表、§10.1/§10.2 边界与偏差备案；接口文档 §8（6 个接口，48 → 54）；数据库设计 19 → 21 表 + §3.8 + §7 取舍 11 |
+| 2026-11-23 | 项目负责人 | **v1.24（账务口径按确认意见修订）**：①§8.9 资金流向表改为「结算时 R + O + L 全部归出租方（物主），平台不参与分成」，裁决冲正在「用户 cash ↔ 物主 cash」之间进行；②充值入口由「注册赠送」改为**用户自助模拟充值**（`wallet.recharge.max` 默认 5000，点确认即到账、无支付渠道），`biz_type = RECHARGE`；③补「损耗费归属」说明（物主承担资产损失）与平台余额可为负的解释（代表已发出的虚拟额度）。接口 48 → 55（新增 `POST /api/wallet/recharge`） |
