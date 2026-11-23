@@ -88,6 +88,20 @@ public class RecommendServiceImpl implements RecommendService {
 
     @Override
     public RecommendResultVO recommend(Integer limit) {
+        return recommend(limit, null);
+    }
+
+    /**
+     * 带历史截止时间的推荐。
+     * <p>
+     * 生产调用永远走 {@link #recommend(Integer)}（cutoff = null，即用全部历史）；
+     * 只有离线评估会传 cutoff —— 把「评测期（cutoff 之后）」的行为从画像里剔除，
+     * 否则等于拿答案喂模型，命中率必然虚高。共现矩阵同样受 cutoff 约束，
+     * 因为共现也是从行为里学出来的。
+     * </p>
+     */
+    @Override
+    public RecommendResultVO recommend(Integer limit, LocalDateTime historyCutoff) {
         int size = normalizeLimit(limit);
         Map<String, String> config = loadConfig();
 
@@ -119,6 +133,7 @@ public class RecommendServiceImpl implements RecommendService {
         List<RentalOrder> myOrders = me == null ? List.of() : rentalOrderMapper.selectList(
                 Wrappers.<RentalOrder>lambdaQuery()
                         .eq(RentalOrder::getRenterId, me.getId())
+                        .lt(historyCutoff != null, RentalOrder::getCreatedAt, historyCutoff)
                         .select(RentalOrder::getItemId, RentalOrder::getStatus, RentalOrder::getCreatedAt));
 
         Set<Long> activeItemIds = myOrders.stream()
@@ -144,9 +159,10 @@ public class RecommendServiceImpl implements RecommendService {
                 .map(Category::getParentId).filter(java.util.Objects::nonNull).collect(Collectors.toSet());
         BigDecimal myAvgPrice = averagePrice(myItems);
 
-        // 共现边：itemId -> 租过它的用户集合
+        // 共现边：itemId -> 租过它的用户集合（评估时同样只用 cutoff 之前的行为）
         Map<Long, Set<Long>> itemUsers = new HashMap<>();
         for (RentalOrder order : rentalOrderMapper.selectList(Wrappers.<RentalOrder>lambdaQuery()
+                .lt(historyCutoff != null, RentalOrder::getCreatedAt, historyCutoff)
                 .select(RentalOrder::getRenterId, RentalOrder::getItemId))) {
             itemUsers.computeIfAbsent(order.getItemId(), key -> new HashSet<>()).add(order.getRenterId());
         }

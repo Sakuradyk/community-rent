@@ -237,14 +237,21 @@ class MapperIntegrationTest {
         assertThat(fee.getOverdueTier2Rate()).isEqualByComparingTo("1.0000");
         assertThat(fee.getDailyPriceMax()).isEqualByComparingTo("500.00");
 
+        // 信誉策略是「可在管理端参数配置页修改」的运行期配置（这是本项目的卖点之一），
+        // 因此只断言结构不变量，不锁具体数值：初始分落在区间内、扣分项为负、
+        // 重罚不轻于轻罚、免押门槛高于普通档上限、比例为正。
         CreditPolicy credit = creditPolicyMapper.selectById(1);
         assertThat(credit).isNotNull();
-        assertThat(credit.getInitScore()).isEqualTo(80);
-        assertThat(credit.getMinScore()).isEqualTo(0);
-        assertThat(credit.getMaxScore()).isEqualTo(100);
-        assertThat(credit.getPenaltyOverdueLight()).isEqualTo(-5);
-        assertThat(credit.getTierSuspendBelow()).isEqualTo(40);
-        assertThat(credit.getTierDepositUpRatio()).isEqualByComparingTo("1.50");
+        assertThat(credit.getInitScore()).isBetween(credit.getMinScore(), credit.getMaxScore());
+        assertThat(credit.getPenaltyOverdueLight()).isNegative();
+        assertThat(credit.getPenaltyOverdueHeavy()).isLessThanOrEqualTo(credit.getPenaltyOverdueLight());
+        assertThat(credit.getPenaltyDamage()).isNegative();
+        assertThat(credit.getPenaltyCancelAfterConfirm()).isNegative();
+        assertThat(credit.getRewardOnTime()).isPositive();
+        assertThat(credit.getRewardDailyCap()).isPositive();
+        assertThat(credit.getTierNormalMax()).isLessThan(credit.getTierFreeDepositMin());
+        assertThat(credit.getTierSuspendBelow()).isLessThan(credit.getTierNormalMin());
+        assertThat(credit.getTierDepositUpRatio()).isGreaterThan(java.math.BigDecimal.ZERO);
 
         LossPolicy loss = lossPolicyMapper.selectById(1);
         assertThat(loss).isNotNull();
