@@ -46,6 +46,7 @@ public enum ErrorCode {
     DEPOSIT_INVALID(4002, "押金金额不合法"),
     SETTLEMENT_ALREADY_DONE(4003, "该订单已完成结算"),
     LOSS_RATIO_INVALID(4004, "损耗系数不合法"),
+    BALANCE_NOT_ENOUGH(4005, "账户余额不足"),
     /**
      * 时段冲突独立编号：唯一索引冲突 catch 后统一转此码，压测断言靠它计数。
      *

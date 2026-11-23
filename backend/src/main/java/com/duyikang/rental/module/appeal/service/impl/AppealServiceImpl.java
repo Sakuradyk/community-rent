@@ -26,6 +26,7 @@ import com.duyikang.rental.module.loss.mapper.LossLogMapper;
 import com.duyikang.rental.module.loss.mapper.LossPolicyMapper;
 import com.duyikang.rental.module.order.entity.RentalOrder;
 import com.duyikang.rental.module.order.mapper.RentalOrderMapper;
+import com.duyikang.rental.module.wallet.service.AccountService;
 import com.duyikang.rental.module.settlement.entity.FeeFlow;
 import com.duyikang.rental.module.settlement.entity.Settlement;
 import com.duyikang.rental.module.settlement.mapper.FeeFlowMapper;
@@ -117,6 +118,7 @@ public class AppealServiceImpl implements AppealService {
 
     private final CreditService creditService;
     private final MessageService messageService;
+    private final AccountService accountService;
 
     @Override
     public PageResult<AppealItemVO> page(String status, Integer pageNum, Integer pageSize) {
@@ -255,6 +257,12 @@ public class AppealServiceImpl implements AppealService {
 
         if (delta.signum() != 0) {
             writeAdjustFlow(order, settlement, originalLossFee, newLossFee, originalRefund, newRefund, delta);
+            // 账务冲正：应退变多则物主退回承租方，变少则承租方补付物主（复式成对入账）
+            if (order != null) {
+                accountService.verdictAdjust(order, delta,
+                        "裁决（" + VerdictType.labelOf(type) + "）冲正，应退 " + originalRefund.toPlainString()
+                                + " → " + newRefund.toPlainString());
+            }
         }
         if (newLossFee.compareTo(originalLossFee) < 0) {
             rollbackItemLoss(order, originalLossFee, newLossFee);

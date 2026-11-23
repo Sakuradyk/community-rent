@@ -8,7 +8,7 @@ SET NAMES utf8mb4;
 USE rental;
 
 -- A1 表数量必须为 19
-SELECT IF(cnt = 19, 'PASS', 'FAIL') AS `A1_table_count`, cnt AS `actual`
+SELECT IF(cnt = 21, 'PASS', 'FAIL') AS `A1_table_count`, cnt AS `actual`
 FROM (SELECT COUNT(*) AS cnt FROM information_schema.tables
       WHERE table_schema = 'rental' AND table_type = 'BASE TABLE') t;
 
@@ -185,3 +185,50 @@ UNION ALL SELECT 'loss_log', COUNT(*) FROM `loss_log`
 UNION ALL SELECT 'appeal', COUNT(*) FROM `appeal`
 UNION ALL SELECT 'message', COUNT(*) FROM `message`
 UNION ALL SELECT 'sys_config', COUNT(*) FROM `sys_config`;
+
+-- ----------------------------------------------------------------------------
+-- A26 账户主体合法：owner_type 只能 USER/EXTERNAL；USER 行必须指向存在的用户；EXTERNAL 只有一行
+-- ----------------------------------------------------------------------------
+SELECT 'A26_account_owner_valid' AS check_item,
+       CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result,
+       COUNT(*) AS bad_rows
+FROM `account` a
+WHERE a.owner_type NOT IN ('USER', 'EXTERNAL')
+   OR (a.owner_type = 'USER' AND NOT EXISTS (SELECT 1 FROM `user` u WHERE u.id = a.owner_id))
+   OR (a.owner_type = 'EXTERNAL' AND a.owner_id <> 0);
+
+SELECT 'A26b_single_external' AS check_item,
+       CASE WHEN COUNT(*) = 1 THEN 'PASS' ELSE 'FAIL' END AS result,
+       COUNT(*) AS external_rows
+FROM `account` WHERE owner_type = 'EXTERNAL';
+
+-- ----------------------------------------------------------------------------
+-- A27 全站守恒：所有账户（可用 + 冻结）之和必须为 0（EXTERNAL 为负即代表净流入）
+-- ----------------------------------------------------------------------------
+SELECT 'A27_global_conservation' AS check_item,
+       CASE WHEN ABS(SUM(cash_balance + frozen_balance)) < 0.005 THEN 'PASS' ELSE 'FAIL' END AS result,
+       SUM(cash_balance + frozen_balance) AS total
+FROM `account`;
+
+-- ----------------------------------------------------------------------------
+-- A28 逐账户对账：每个账户的两个余额都必须等于其分录累计（只追加、可重算）
+-- ----------------------------------------------------------------------------
+SELECT 'A28_balance_reconcile' AS check_item,
+       CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result,
+       COUNT(*) AS mismatched_accounts
+FROM (
+    SELECT a.id,
+           a.cash_balance,
+           COALESCE((SELECT SUM(e.amount) FROM `account_entry` e
+                      WHERE e.to_account_id = a.id AND e.to_bucket = 'CASH'), 0)
+         - COALESCE((SELECT SUM(e.amount) FROM `account_entry` e
+                      WHERE e.from_account_id = a.id AND e.from_bucket = 'CASH'), 0) AS calc_cash,
+           a.frozen_balance,
+           COALESCE((SELECT SUM(e.amount) FROM `account_entry` e
+                      WHERE e.to_account_id = a.id AND e.to_bucket = 'FROZEN'), 0)
+         - COALESCE((SELECT SUM(e.amount) FROM `account_entry` e
+                      WHERE e.from_account_id = a.id AND e.from_bucket = 'FROZEN'), 0) AS calc_frozen
+    FROM `account` a
+) t
+WHERE ABS(t.cash_balance - t.calc_cash) >= 0.005
+   OR ABS(t.frozen_balance - t.calc_frozen) >= 0.005;

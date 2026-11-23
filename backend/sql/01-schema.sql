@@ -557,5 +557,54 @@ CREATE TABLE `sys_config` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '系统参数表（键值）';
 
 -- ============================================================================
--- 建表完成：18 张表
+-- 九、钱包与账务（复式记账，K3 的资金侧证据）
+-- ============================================================================
+DROP TABLE IF EXISTS `account_entry`;
+DROP TABLE IF EXISTS `account`;
+
+-- 9.1 账户表（每个用户一行 + 全站一个 EXTERNAL 行）
+CREATE TABLE `account` (
+    `id`             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `owner_type`     VARCHAR(16)     NOT NULL                COMMENT 'USER 用户 / EXTERNAL 系统外部（银行卡等资金来源去向的镜像）',
+    `owner_id`       BIGINT UNSIGNED NOT NULL DEFAULT 0      COMMENT 'USER 时为 user.id；EXTERNAL 固定 0',
+    `cash_balance`   DECIMAL(12,2)   NOT NULL DEFAULT 0.00   COMMENT '可用余额（EXTERNAL 允许为负，代表净流入）',
+    `frozen_balance` DECIMAL(12,2)   NOT NULL DEFAULT 0.00   COMMENT '冻结余额（在租订单的租金+押金）',
+    `version`        INT             NOT NULL DEFAULT 0      COMMENT '乐观锁版本号',
+    `created_at`     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_account` (`owner_type`, `owner_id`),
+    CONSTRAINT `ck_account_balances` CHECK (`owner_type` = 'EXTERNAL' OR (`cash_balance` >= 0 AND `frozen_balance` >= 0)),
+    CONSTRAINT `ck_account_owner` CHECK ((`owner_type` = 'EXTERNAL' AND `owner_id` = 0) OR (`owner_type` = 'USER' AND `owner_id` > 0)),
+    CONSTRAINT `ck_account_type` CHECK (`owner_type` IN ('USER','EXTERNAL'))
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '账户表（复式记账的账户主体）';
+
+-- 9.2 分录表（只追加，不改写；每笔业务借贷成对）
+CREATE TABLE `account_entry` (
+    `id`                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `entry_no`           VARCHAR(32)     NOT NULL                COMMENT '分录号 F + yyyyMMdd + 4 位当日序号 + 2 位组内序号',
+    `biz_type`           VARCHAR(24)     NOT NULL                COMMENT 'RECHARGE / ORDER_FREEZE / ORDER_RELEASE / SETTLE / VERDICT / ADMIN_ADJUST',
+    `biz_id`             BIGINT UNSIGNED NOT NULL DEFAULT 0      COMMENT '关联业务主键：订单 id / 结算单 id / 0 表示无单据',
+    `action`             VARCHAR(24)     NOT NULL                COMMENT 'FREEZE / RELEASE / RENT / OVERDUE / LOSS / REFUND / ADJUST / RECHARGE',
+    `from_account_id`    BIGINT UNSIGNED NOT NULL                COMMENT '出账账户',
+    `to_account_id`      BIGINT UNSIGNED NOT NULL                COMMENT '入账账户',
+    `from_bucket`        VARCHAR(8)      NOT NULL DEFAULT 'CASH' COMMENT '出账桶：CASH 可用 / FROZEN 冻结',
+    `to_bucket`          VARCHAR(8)      NOT NULL DEFAULT 'CASH' COMMENT '入账桶：CASH 可用 / FROZEN 冻结',
+    `amount`             DECIMAL(12,2)   NOT NULL                COMMENT '金额（恒为正，方向由 from/to 表达）',
+    `from_balance_after` DECIMAL(12,2)   NOT NULL                COMMENT '出账后该账户该桶余额快照',
+    `to_balance_after`   DECIMAL(12,2)   NOT NULL                COMMENT '入账后该账户该桶余额快照',
+    `remark`             VARCHAR(255)             DEFAULT NULL   COMMENT '说明',
+    `created_at`         DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记账时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_entry_no` (`entry_no`),
+    UNIQUE KEY `uk_entry_biz` (`biz_type`, `biz_id`, `action`, `from_account_id`, `to_account_id`),
+    KEY `idx_entry_from` (`from_account_id`, `created_at`) COMMENT '按账户查流水（出账侧）',
+    KEY `idx_entry_to` (`to_account_id`, `created_at`)     COMMENT '按账户查流水（入账侧）',
+    CONSTRAINT `ck_entry_amount` CHECK (`amount` > 0),
+    CONSTRAINT `ck_entry_accounts` CHECK (`from_account_id` <> `to_account_id` OR `from_bucket` <> `to_bucket`),
+    CONSTRAINT `ck_entry_buckets` CHECK (`from_bucket` IN ('CASH','FROZEN') AND `to_bucket` IN ('CASH','FROZEN'))
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '分录表（复式记账，只追加）';
+
+-- ============================================================================
+-- 建表完成：21 张表
 -- ============================================================================

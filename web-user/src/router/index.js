@@ -93,6 +93,12 @@ const routes = [
         meta: { title: '站内消息', requiresAuth: true }
       },
       {
+        path: 'wallet',
+        name: 'wallet',
+        component: () => import('@/views/wallet/WalletView.vue'),
+        meta: { title: '我的账单', requiresAuth: true }
+      },
+      {
         path: 'mine',
         name: 'mine',
         component: () => import('@/views/mine/ProfileView.vue'),

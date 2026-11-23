@@ -191,3 +191,28 @@ INSERT INTO `message` (`user_id`, `type`, `title`, `content`, `biz_type`, `biz_i
 -- ============================================================================
 -- 初始化完成：角色 2 / 社区 6 / 用户 4 / 类目 11 / 物品 7 / 策略 3 / 参数 9 / 订单 3
 -- ============================================================================
+
+-- ============================================================================
+-- 九、钱包与账务种子（EXTERNAL 代表「用户自己银行卡/其它账户」的镜像）
+-- ============================================================================
+-- 9.1 账户：1 = EXTERNAL（负数代表已从外部净流入的资金），2–5 = 四个种子用户
+INSERT INTO `account` (`id`, `owner_type`, `owner_id`, `cash_balance`, `frozen_balance`, `version`) VALUES
+    (1, 'EXTERNAL', 0, -4000.00, 0.00, 0),
+    (2, 'USER',     1,  1000.00, 0.00, 0),
+    (3, 'USER',     2,  1000.00, 0.00, 0),
+    (4, 'USER',     3,  1000.00, 0.00, 0),
+    (5, 'USER',     4,  1000.00, 0.00, 0);
+
+-- 9.2 分录：四个用户各一笔「演示初始额度」充值，EXTERNAL 累减，用户各自 +1000
+INSERT INTO `account_entry`
+    (`entry_no`, `biz_type`, `biz_id`, `action`, `from_account_id`, `to_account_id`,
+     `from_bucket`, `to_bucket`, `amount`, `from_balance_after`, `to_balance_after`, `remark`)
+VALUES
+    ('F202611010101', 'RECHARGE', 0, 'RECHARGE', 1, 2, 'CASH', 'CASH', 1000.00, -1000.00, 1000.00, '演示初始额度'),
+    ('F202611010102', 'RECHARGE', 0, 'RECHARGE', 1, 3, 'CASH', 'CASH', 1000.00, -2000.00, 1000.00, '演示初始额度'),
+    ('F202611010103', 'RECHARGE', 0, 'RECHARGE', 1, 4, 'CASH', 'CASH', 1000.00, -3000.00, 1000.00, '演示初始额度'),
+    ('F202611010104', 'RECHARGE', 0, 'RECHARGE', 1, 5, 'CASH', 'CASH', 1000.00, -4000.00, 1000.00, '演示初始额度');
+-- 9.3 钱包配置：单次模拟充值上限（用户自助充值时的业务上限）
+INSERT INTO `sys_config` (`config_key`, `config_value`, `value_type`, `config_group`, `description`) VALUES
+    ('wallet.recharge.max', '5000', 'DECIMAL', 'wallet', '单次模拟充值上限（元）')
+ON DUPLICATE KEY UPDATE `config_value` = VALUES(`config_value`);

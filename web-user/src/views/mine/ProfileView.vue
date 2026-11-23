@@ -1,5 +1,57 @@
 <template>
   <div class="page-container">
+    <div class="card wallet-card">
+      <div class="wallet-head">
+        <div>
+          <div class="wallet-title">我的钱包</div>
+          <div class="muted small">下单冻结「租金 + 押金」，结算后多退少补</div>
+        </div>
+        <div class="wallet-actions">
+          <el-button size="small" @click="router.push({ name: 'wallet' })">账单明细</el-button>
+          <el-button type="primary" size="small" @click="openRecharge">充值</el-button>
+        </div>
+      </div>
+      <div class="wallet-grid">
+        <div class="wallet-item">
+          <div class="wallet-value">¥{{ money(wallet.cashBalance) }}</div>
+          <div class="muted small">可用余额</div>
+        </div>
+        <div class="wallet-item">
+          <div class="wallet-value wallet-frozen">¥{{ money(wallet.frozenBalance) }}</div>
+          <div class="muted small">冻结中</div>
+        </div>
+        <div class="wallet-item">
+          <div class="wallet-value">¥{{ money(wallet.totalBalance) }}</div>
+          <div class="muted small">账户总额</div>
+        </div>
+      </div>
+    </div>
+
+    <el-dialog v-model="rechargeVisible" title="充值" width="380px">
+      <div class="preset-row">
+        <el-button
+          v-for="p in RECHARGE_PRESETS"
+          :key="p"
+          size="small"
+          :type="rechargeForm.amount === p ? 'primary' : ''"
+          @click="rechargeForm.amount = p"
+        >{{ p }} 元</el-button>
+      </div>
+      <el-input-number
+        v-model="rechargeForm.amount"
+        :min="1"
+        :max="LIMITS.RECHARGE_MAX"
+        :precision="2"
+        style="width: 100%; margin-top: 12px"
+      />
+      <div class="muted small" style="margin-top: 8px">
+        单次最多 {{ LIMITS.RECHARGE_MAX }} 元。演示用途：点确认即到账，没有真实支付渠道。
+      </div>
+      <template #footer>
+        <el-button @click="rechargeVisible = false">取消</el-button>
+        <el-button type="primary" :loading="rechargeLoading" @click="submitRecharge">确认充值</el-button>
+      </template>
+    </el-dialog>
     <div class="card" v-if="userStore.profile">
       <div class="head">
         <el-upload
@@ -68,7 +120,8 @@ import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { listCommunities } from '@/api/community'
 import { uploadImage } from '@/api/file'
-import { LIMITS, USER_STATUS, statusOf } from '@/utils/constants'
+import { LIMITS, RECHARGE_PRESETS, USER_STATUS, statusOf } from '@/utils/constants'
+import { getWallet, recharge } from '@/api/wallet'
 import { maskPhone, formatDateTime } from '@/utils/format'
 
 const router = useRouter()
@@ -81,6 +134,55 @@ const form = reactive({ nickname: '', communityId: null })
 
 const avatarUrl = computed(() => userStore.profile?.avatarUrl || '')
 
+// ---------------- 钱包（可用 / 冻结 / 总额 + 模拟充值）
+const wallet = reactive({ accountId: null, cashBalance: 0, frozenBalance: 0, totalBalance: 0 })
+const rechargeVisible = ref(false)
+const rechargeLoading = ref(false)
+const rechargeForm = reactive({ amount: 50 })
+
+function money(v) {
+  return Number(v || 0).toFixed(2)
+}
+
+async function loadWallet() {
+  try {
+    const data = await getWallet()
+    if (data) {
+      wallet.accountId = data.accountId
+      wallet.cashBalance = data.cashBalance
+      wallet.frozenBalance = data.frozenBalance
+      wallet.totalBalance = data.totalBalance
+    }
+  } catch (e) {
+    // 钱包加载失败不阻塞资料页：顶栏与下单页仍以后端为准
+  }
+}
+
+function openRecharge() {
+  rechargeForm.amount = RECHARGE_PRESETS[0]
+  rechargeVisible.value = true
+}
+
+async function submitRecharge() {
+  if (!rechargeForm.amount || rechargeForm.amount <= 0) {
+    ElMessage.warning('请输入大于 0 的金额')
+    return
+  }
+  rechargeLoading.value = true
+  try {
+    const data = await recharge(rechargeForm.amount)
+    if (data) {
+      wallet.cashBalance = data.cashBalance
+      wallet.frozenBalance = data.frozenBalance
+      wallet.totalBalance = data.totalBalance
+    }
+    rechargeVisible.value = false
+    ElMessage.success(`充值 ${money(rechargeForm.amount)} 元成功`)
+  } finally {
+    rechargeLoading.value = false
+  }
+}
+
 function syncForm(p) {
   form.nickname = p?.nickname || ''
   form.communityId = p?.communityId || null
@@ -89,6 +191,7 @@ function syncForm(p) {
 watch(() => userStore.profile, syncForm, { immediate: true })
 
 onMounted(async () => {
+  loadWallet()
   try {
     communities.value = await listCommunities()
   } catch (e) {
@@ -165,4 +268,52 @@ async function handleLogout() {
 
 .credit { text-align: right; }
 .credit-value { font-size: 28px; font-weight: 700; color: $color-primary; }
+</style>
+
+<style scoped lang="scss">
+
+@use '@/assets/styles/variables.scss' as *;.wallet-card {
+  .wallet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $space-3;
+  }
+
+  .wallet-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: $color-text;
+  }
+
+  .wallet-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: $space-3;
+    margin-top: $space-3;
+    padding-top: $space-3;
+    border-top: 1px dashed $color-border;
+  }
+
+  .wallet-item {
+    text-align: center;
+  }
+
+  .wallet-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: $color-primary-deep;
+    line-height: 1.4;
+  }
+
+  .wallet-frozen {
+    color: $color-text-secondary;
+  }
+}
+
+.preset-row {
+  display: flex;
+  gap: $space-2;
+  flex-wrap: wrap;
+}
 </style>

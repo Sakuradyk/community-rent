@@ -122,7 +122,9 @@ export const LIMITS = {
   NICKNAME_MIN: 2,
   NICKNAME_MAX: 16,
   PASSWORD_MIN: 6,
-  PASSWORD_MAX: 20
+  PASSWORD_MAX: 20,
+  // 模拟充值：与后端 sys_config['wallet.recharge.max'] 默认值对齐，仅作前端输入上限（最终以后端为准）
+  RECHARGE_MAX: 5000
 }
 
 /** 日期格式（规则 F8：前端只传这个格式，禁止 Date 对象与 ISO 串） */
@@ -172,3 +174,9 @@ export const BIZ_ROUTE = {
   SETTLEMENT: 'settlement',
   ITEM: 'item-detail'
 }
+
+
+/**
+ * 充值快捷金额（演示用）：点一下填进输入框，用户仍可自定义。
+ */
+export const RECHARGE_PRESETS = [50, 100, 200, 500]

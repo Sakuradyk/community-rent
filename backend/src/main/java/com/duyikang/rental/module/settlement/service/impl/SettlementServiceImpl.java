@@ -17,6 +17,7 @@ import com.duyikang.rental.module.loss.mapper.LossLogMapper;
 import com.duyikang.rental.module.loss.service.LossService;
 import com.duyikang.rental.module.order.entity.OrderOccupancy;
 import com.duyikang.rental.module.order.entity.RentalOrder;
+import com.duyikang.rental.module.wallet.service.AccountService;
 import com.duyikang.rental.module.message.service.MessageService;
 import com.duyikang.rental.module.order.mapper.OrderOccupancyMapper;
 import com.duyikang.rental.module.order.mapper.RentalOrderMapper;
@@ -105,6 +106,7 @@ public class SettlementServiceImpl implements SettlementService {
      */
     private final PlatformTransactionManager transactionManager;
     private final MessageService messageService;
+    private final AccountService accountService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -248,6 +250,9 @@ public class SettlementServiceImpl implements SettlementService {
         orderPatch.setActualReturnDate(today);
         orderPatch.setOverdueDays(overdueDays);
         rentalOrderMapper.updateById(orderPatch);
+
+        // 账务划转：租金 + 逾期费 + 损耗费归物主，押金剩余退回承租方（复式成对入账）
+        accountService.settleOrder(order, order.getRentAmount(), overdueFee, loss.lossFee(), refund);
 
         // 释放占用：归还后这几天可以再被别人租
         orderOccupancyMapper.delete(Wrappers.<OrderOccupancy>lambdaQuery()

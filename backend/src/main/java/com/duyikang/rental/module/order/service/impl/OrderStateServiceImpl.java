@@ -16,6 +16,7 @@ import com.duyikang.rental.module.message.service.MessageService;
 import com.duyikang.rental.module.order.mapper.OrderOccupancyMapper;
 import com.duyikang.rental.module.order.mapper.RentalOrderMapper;
 import com.duyikang.rental.module.order.service.OrderStateService;
+import com.duyikang.rental.module.wallet.service.AccountService;
 import com.duyikang.rental.security.CurrentUser;
 import com.duyikang.rental.security.LoginUser;
 import lombok.RequiredArgsConstructor;
@@ -55,6 +56,7 @@ public class OrderStateServiceImpl implements OrderStateService {
     private final ItemMapper itemMapper;
     private final CreditService creditService;
     private final MessageService messageService;
+    private final AccountService accountService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -147,6 +149,9 @@ public class OrderStateServiceImpl implements OrderStateService {
 
         // 释放占用：这是 K2 的"放"，漏了就会把那几天永久占死
         int released = releaseOccupancy(orderId);
+
+        // 解冻资金：把该订单的「租金 + 押金」全额退回可用余额（无冻结记录的老订单会被跳过）
+        accountService.releaseForOrder(order, "订单取消，解冻全部金额：" + reason);
 
         // 物品恢复在架（只有被标记过 RENTED 的才需要恢复）
         itemMapper.update(null, Wrappers.<Item>lambdaUpdate()

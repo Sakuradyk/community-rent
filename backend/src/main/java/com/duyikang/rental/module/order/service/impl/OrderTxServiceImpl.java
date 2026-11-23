@@ -8,6 +8,7 @@ import com.duyikang.rental.module.order.entity.RentalOrder;
 import com.duyikang.rental.module.order.mapper.OrderOccupancyMapper;
 import com.duyikang.rental.module.order.mapper.RentalOrderMapper;
 import com.duyikang.rental.module.order.service.OrderTxService;
+import com.duyikang.rental.module.wallet.service.AccountService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -35,6 +36,7 @@ public class OrderTxServiceImpl implements OrderTxService {
 
     private final RentalOrderMapper rentalOrderMapper;
     private final OrderOccupancyMapper orderOccupancyMapper;
+    private final AccountService accountService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -68,6 +70,11 @@ public class OrderTxServiceImpl implements OrderTxService {
             occupancy.setOccupyDate(day);
             orderOccupancyMapper.insert(occupancy);
         }
+
+        // 冻结资金：把「租金 + 押金」从可用余额挪进冻结余额，余额不足报 4005。
+        // 必须在同一个事务里——否则可能出现「订单已生成、钱没冻住」的半成品。
+        order.setRentAmount(rentAmount);
+        accountService.freezeForOrder(order);
 
         log.info("订单创建成功 orderId={} orderNo={} itemId={} renterId={} {}~{} 共 {} 天",
                 order.getId(), order.getOrderNo(), item.getId(), renterId, startDate, endDate, rentDays);

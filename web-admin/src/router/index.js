@@ -32,6 +32,12 @@ const routes = [
         meta: { title: '申诉裁决', requiresAdmin: true }
       },
       {
+        path: 'accounts',
+        name: 'accounts',
+        component: () => import('@/views/account/AccountView.vue'),
+        meta: { title: '账务对账' }
+      },
+      {
         path: 'config',
         name: 'config',
         component: () => import('@/views/config/ConfigView.vue'),

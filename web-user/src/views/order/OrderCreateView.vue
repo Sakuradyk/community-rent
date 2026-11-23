@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { createOrder, quoteOrder } from '@/api/order'
 import { getItem } from '@/api/item'
+import { getWallet } from '@/api/wallet'
 import { CODE } from '@/utils/constants'
 import { formatMoney, resolveImageUrl } from '@/utils/format'
 
@@ -22,6 +23,22 @@ const quoteLoading = ref(false)
 /** 4090 的 data：{ itemId, conflictDates: [], suggestRanges: [{ startDate, endDate }] } */
 const conflict = ref(null)
 const submitting = ref(false)
+
+// 可用余额：只用于提示与置灰，真正的裁决仍在后端（冻结失败会返回 4005）
+const availableBalance = ref(0)
+const balanceShort = computed(() => {
+  if (!quote.value) return false
+  return Number(availableBalance.value) < Number(quote.value.totalAmount || 0)
+})
+
+async function loadBalance() {
+  try {
+    const data = await getWallet()
+    availableBalance.value = Number(data?.cashBalance || 0)
+  } catch (e) {
+    // 余额拿不到就不拦提交，交给后端判定
+  }
+}
 
 const rentDays = computed(() => {
   if (!quote.value) return 0
@@ -108,7 +125,10 @@ async function submit() {
   }
 }
 
-onMounted(loadItem)
+onMounted(async () => {
+  await loadItem()
+  loadBalance()
+})
 </script>
 
 <template>
@@ -192,20 +212,39 @@ onMounted(loadItem)
           <div class="row"><span>租金</span><span>¥{{ formatMoney(quote.rentAmount) }}</span></div>
           <div class="row"><span>押金（归还后退）</span><span>¥{{ formatMoney(quote.depositAmount) }}</span></div>
           <div class="row total"><span>合计</span><span>¥{{ formatMoney(quote.totalAmount) }}</span></div>
+          <div class="row">
+            <span>本次将冻结</span>
+            <span>¥{{ formatMoney(quote.totalAmount) }}（归还结算后多退少补）</span>
+          </div>
+          <div class="row">
+            <span>我的可用余额</span>
+            <span :class="{ 'balance-short': balanceShort }">¥{{ formatMoney(availableBalance) }}</span>
+          </div>
         </div>
         <p v-else-if="quoteLoading" class="muted small">正在试算…</p>
+
+        <el-alert
+          v-if="balanceShort"
+          type="warning"
+          :closable="false"
+          show-icon
+          title="可用余额不足本次冻结金额"
+          description="去「我的」页面充值后再提交（充值为演示功能，点确认即到账）。"
+          style="margin-bottom: 12px"
+        />
 
         <div class="actions">
           <el-button
             type="primary"
             size="large"
             :loading="submitting"
-            :disabled="!quote"
+            :disabled="!quote || balanceShort"
             @click="submit"
           >
             提交订单
           </el-button>
           <el-button size="large" @click="router.back()">取消</el-button>
+          <el-button v-if="balanceShort" size="large" @click="router.push({ name: 'mine' })">去充值</el-button>
         </div>
         <p class="muted small">
           提交后订单进入「待确认」，并立即占用所选日期；同一时段只会有一个人成功。
@@ -324,5 +363,12 @@ onMounted(loadItem)
   display: flex;
   gap: $space-3;
   margin-bottom: $space-2;
+}
+</style>
+<style scoped lang="scss">
+
+@use '@/assets/styles/variables.scss' as *;.balance-short {
+  color: -danger;
+  font-weight: 600;
 }
 </style>

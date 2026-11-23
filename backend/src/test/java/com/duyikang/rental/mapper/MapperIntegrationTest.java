@@ -46,7 +46,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 19 张表实体 + Mapper 集成测试。
+ * 21 张表实体 + Mapper 集成测试。
  *
  * <p>连真实 {@code rental} 库（种子数据来自 {@code backend/sql/02-data.sql}），
  * 每个测试方法自带 {@code @Transactional}，结束后自动回滚，不污染库。</p>
@@ -56,7 +56,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 @SpringBootTest
 @Transactional
-@DisplayName("Mapper 层：19 张表的映射与约束")
+@DisplayName("Mapper 层：21 张表的映射与约束")
 class MapperIntegrationTest {
 
     @Autowired private UserMapper userMapper;
@@ -78,11 +78,13 @@ class MapperIntegrationTest {
     @Autowired private AppealMapper appealMapper;
     @Autowired private MessageMapper messageMapper;
     @Autowired private SysConfigMapper sysConfigMapper;
+    @Autowired private com.duyikang.rental.module.wallet.mapper.AccountMapper accountMapper;
+    @Autowired private com.duyikang.rental.module.wallet.mapper.AccountEntryMapper accountEntryMapper;
 
     @Autowired private JdbcTemplate jdbcTemplate;
 
     @Test
-    @DisplayName("selectCount_19张表_与种子数据行数一致")
+    @DisplayName("selectCount_21张表_与种子数据行数一致")
     void selectCount_allTables_equalsSeedData() {
         // user / user_role 会随浏览器注册与联调不断增长，锁死总行数会让一条无关的注册失败，
         // 因此改为"4 个种子手机号都在"——映射正确性同样得到验证，且不受真实使用影响。
@@ -120,7 +122,10 @@ class MapperIntegrationTest {
         assertThat(creditPolicyMapper.selectCount(null)).isEqualTo(1L);
         assertThat(feePolicyMapper.selectCount(null)).isEqualTo(1L);
         assertThat(lossPolicyMapper.selectCount(null)).isEqualTo(1L);
-        assertThat(sysConfigMapper.selectCount(null)).isGreaterThanOrEqualTo(13L);
+        assertThat(sysConfigMapper.selectCount(null)).isGreaterThanOrEqualTo(14L);
+        // 账户：EXTERNAL 1 行 + 种子用户 4 行；分录随真实充值增长，只做下界
+        assertThat(accountMapper.selectCount(null)).isGreaterThanOrEqualTo(5L);
+        assertThat(accountEntryMapper.selectCount(null)).isGreaterThanOrEqualTo(4L);
     }
 
     @Test
