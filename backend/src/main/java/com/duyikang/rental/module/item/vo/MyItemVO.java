@@ -31,6 +31,11 @@ public record MyItemVO(
         String statusLabel,
         String auditRemark,
         Integer imageCount,
+        /**
+         * 累计损耗值（0–1）。放在「我的物品」列表里，是为了让物主一眼看出哪件该保养了 ——
+         * K6 的「损耗可见」不只在详情页体现。
+         */
+        BigDecimal lossValue,
         LocalDateTime createdAt
 ) {
 }

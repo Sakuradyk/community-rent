@@ -8,6 +8,14 @@ import { formatMoney, formatDateTime, resolveImageUrl } from '@/utils/format'
 
 const router = useRouter()
 
+/** 损耗条配色与详情页一致：<0.6 正常、≥0.6 提示保养、≥0.85 转检修 */
+function lossColorOf(value) {
+  const v = Number(value || 0)
+  if (v >= 0.85) return '#b91c1c'
+  if (v >= 0.6) return '#b45309'
+  return '#15803d'
+}
+
 const loading = ref(false)
 const list = ref([])
 const total = ref(0)
@@ -124,6 +132,19 @@ onMounted(load)
             {{ item.categoryName }} · {{ item.communityName }} · {{ item.imageCount }} 张图 · 已租
             {{ item.rentCount }} 次
           </p>
+          <p class="loss-line">
+            <span class="muted">累计损耗</span>
+            <el-progress
+              :percentage="Math.min(100, Math.round(Number(item.lossValue || 0) * 10000) / 100)"
+              :stroke-width="6"
+              :color="lossColorOf(item.lossValue)"
+              :show-text="false"
+              class="loss-bar"
+            />
+            <span class="loss-num">{{ Number(item.lossValue || 0).toFixed(4) }}</span>
+            <el-tag v-if="Number(item.lossValue || 0) >= 0.85" size="small" color="#b91c1c" effect="plain" style="border:none">该检修了</el-tag>
+            <el-tag v-else-if="Number(item.lossValue || 0) >= 0.6" size="small" color="#b45309" effect="plain" style="border:none">该保养了</el-tag>
+          </p>
           <p class="price">
             ¥{{ formatMoney(item.dailyPrice) }}/天 <span class="muted">押金 ¥{{ formatMoney(item.deposit) }}</span>
           </p>
@@ -176,6 +197,23 @@ onMounted(load)
 
 <style scoped lang="scss">
 @use '@/assets/styles/variables.scss' as *;
+.loss-line {
+  display: flex;
+  align-items: center;
+  gap: $space-2;
+  margin: $space-1 0 0;
+  font-size: $font-size-xs;
+}
+
+.loss-bar {
+  width: 90px;
+  flex: 0 0 90px;
+}
+
+.loss-num {
+  color: $color-text;
+  font-variant-numeric: tabular-nums;
+}
 
 .page-head {
   display: flex;

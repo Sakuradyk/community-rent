@@ -20,6 +20,15 @@ const images = computed(() => (item.value?.images || []).map((img) => resolveIma
 const mainImage = computed(() => images.value[activeImage.value] || '')
 const status = computed(() => statusOf(ITEM_STATUS, item.value?.status))
 const maintenance = computed(() => statusOf(MAINTENANCE_STATE, item.value?.maintenanceState))
+
+/** K6 可视化：损耗值累计到 1 上限，0.6 提示保养、0.85 转检修（阈值来自 loss_policy，这里是展示口径） */
+const lossValue = computed(() => Number(item.value?.lossValue ?? 0))
+const lossPercent = computed(() => Math.min(100, Math.round(lossValue.value * 10000) / 100))
+const lossColor = computed(() => {
+  if (lossValue.value >= 0.85) return '#b91c1c'
+  if (lossValue.value >= 0.6) return '#b45309'
+  return '#15803d'
+})
 const isOwner = computed(() => Boolean(item.value) && String(item.value.owner?.id) === String(userStore.profile?.id))
 
 async function load() {
@@ -95,7 +104,24 @@ onMounted(load)
               <el-tag :color="maintenance.color" effect="plain" style="border: none">
                 {{ maintenance.label }}
               </el-tag>
-              <span class="muted hint">损耗值 {{ item.lossValue }}（累计，达阈值会自动提醒保养）</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="累计损耗">
+              <div class="loss-box">
+                <el-progress
+                  :percentage="lossPercent"
+                  :stroke-width="10"
+                  :color="lossColor"
+                  :show-text="false"
+                />
+                <div class="loss-text">
+                  <strong>{{ item.lossValue }}</strong>
+                  <span class="muted">/ 1.0000（每次归还按租期、类目、归还成色累加）</span>
+                </div>
+                <div class="loss-thresholds muted">
+                  <span :class="{ reached: lossValue >= 0.6 }">0.60 提示保养</span>
+                  <span :class="{ reached: lossValue >= 0.85 }">0.85 转检修</span>
+                </div>
+              </div>
             </el-descriptions-item>
             <el-descriptions-item label="发布者">
               <span>{{ item.owner?.nickname }}</span>
@@ -147,6 +173,34 @@ onMounted(load)
 
 <style scoped lang="scss">
 @use '@/assets/styles/variables.scss' as *;
+
+.loss-box {
+  display: flex;
+  flex-direction: column;
+  gap: $space-1;
+  max-width: 340px;
+}
+
+.loss-text {
+  font-size: $font-size-sm;
+  color: $color-text;
+
+  .muted {
+    margin-left: $space-1;
+    font-size: $font-size-xs;
+  }
+}
+
+.loss-thresholds {
+  display: flex;
+  gap: $space-3;
+  font-size: $font-size-xs;
+
+  .reached {
+    color: $color-overdue;
+    font-weight: 600;
+  }
+}
 
 .back {
   margin-bottom: $space-4;

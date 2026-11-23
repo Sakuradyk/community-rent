@@ -56,6 +56,7 @@ public final class ItemConvert {
                 ItemStatus.labelOf(item.getStatus()),
                 item.getAuditRemark(),
                 imageCount,
+                item.getLossValue(),
                 item.getCreatedAt()
         );
     }

@@ -1,14 +1,22 @@
 <script setup>
 import { computed } from 'vue'
+import { useUserStore } from '@/stores/user'
 import { formatMoney, resolveImageUrl } from '@/utils/format'
 
 const props = defineProps({
   item: { type: Object, required: true }
 })
 
+const userStore = useUserStore()
+
 const cover = computed(() => resolveImageUrl(props.item.coverUrl))
 // available 只在前端传了日期区间时才有值（后端按区间与占用表比对），null 表示"未查询"
 const availability = computed(() => props.item.available)
+// 同小区徽标只在"我填了社区且与物品同社区"时亮；纯展示标记，排序与筛选仍由后端 SQL 决定（F1）
+const sameCommunity = computed(() => {
+  const mine = userStore.profile?.communityId
+  return Boolean(mine && props.item.communityId && String(mine) === String(props.item.communityId))
+})
 </script>
 
 <template>
@@ -16,6 +24,7 @@ const availability = computed(() => props.item.available)
     <div class="cover">
       <img v-if="cover" :src="cover" :alt="item.title" loading="lazy" />
       <div v-else class="cover-fallback">暂无图片</div>
+      <span v-if="sameCommunity" class="badge badge-same">同小区</span>
       <span v-if="availability === true" class="badge badge-ok">所选日期可租</span>
       <span v-else-if="availability === false" class="badge badge-bad">所选日期已租出</span>
     </div>
@@ -70,6 +79,16 @@ const availability = computed(() => props.item.available)
   height: 100%;
   color: $color-text-placeholder;
   font-size: $font-size-sm;
+}
+
+.badge-same {
+  top: auto;
+  bottom: $space-2;
+  left: $space-2;
+  background: rgba(255, 255, 255, 0.94);
+  color: $color-primary-deep;
+  border: 1px solid $color-primary-tint;
+  font-weight: 600;
 }
 
 .badge {
