@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.duyikang.rental.common.constant.ErrorCode;
 import com.duyikang.rental.common.constant.ItemStatus;
+import com.duyikang.rental.common.constant.MessageType;
 import com.duyikang.rental.common.exception.BizException;
 import com.duyikang.rental.common.result.PageResult;
 import com.duyikang.rental.module.item.convert.ItemConvert;
@@ -16,6 +17,7 @@ import com.duyikang.rental.module.item.mapper.CategoryMapper;
 import com.duyikang.rental.module.item.mapper.CommunityMapper;
 import com.duyikang.rental.module.item.mapper.ItemImageMapper;
 import com.duyikang.rental.module.item.mapper.ItemMapper;
+import com.duyikang.rental.module.message.service.MessageService;
 import com.duyikang.rental.module.item.service.ItemAdminService;
 import com.duyikang.rental.module.item.vo.AdminItemVO;
 import com.duyikang.rental.module.item.vo.ItemImageVO;
@@ -65,6 +67,7 @@ public class ItemAdminServiceImpl implements ItemAdminService {
     private final CategoryMapper categoryMapper;
     private final CommunityMapper communityMapper;
     private final UserMapper userMapper;
+    private final MessageService messageService;
 
     @Override
     public PageResult<AdminItemVO> page(String status, String keyword, Integer pageNum, Integer pageSize) {
@@ -150,6 +153,13 @@ public class ItemAdminServiceImpl implements ItemAdminService {
                 .set(Item::getAuditRemark, remark)
                 .set(Item::getAuditAdminId, adminId)
                 .set(Item::getAuditTime, LocalDateTime.now()));
+
+        messageService.notify(item.getOwnerId(), MessageType.SYSTEM,
+                approved ? "物品审核通过" : "物品审核未通过",
+                approved
+                        ? "「" + item.getTitle() + "」已上架，可以在列表页看到它了。"
+                        : "「" + item.getTitle() + "」未通过审核：" + remark + "。修改后可重新提交。",
+                MessageType.BIZ_ITEM, itemId);
 
         log.info("物品审核完成 itemId={} approved={} nextStatus={} adminId={}", itemId, approved, nextStatus, adminId);
     }

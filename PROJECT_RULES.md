@@ -12,7 +12,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.20 · 2026-11-23 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
+> **版本**：v1.21 · 2026-11-23 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
 
 ---
 
@@ -809,6 +809,19 @@ int rows = rentalOrderMapper.update(null, Wrappers.<RentalOrder>lambdaUpdate()
 | 参数读写 | 策略表只提交要改的字段（未提交的保持原值，防覆盖他人改动）；`sys_config` 只改已存在的键，按 `valueType` 校验；**不做配置缓存**，因此"保存即生效"是自然结果，不需要 `@RefreshScope` |
 | 禁止 | 前端自己算推荐理由或权重展示；把类目名/小区名写进 `constants.js` 当枚举（F16）；统计接口里放随机数或假数据 |
 
+### 8.8 消息通知规范（站内消息，**通知失败不许拖垮业务**）
+
+| 规定 | 内容 |
+| :-- | :-- |
+| 入口唯一 | 业务侧只调 `MessageService.notify(...)`；`send(...)` 会抛异常，仅测试用 |
+| 失败姿态 | `notify` 内部 catch `RuntimeException` 并 `log.warn`。主业务已经成功，消息发不出去最多丢一条提醒，**不许**因此回滚订单/结算 |
+| 写入时机 | 只在状态变更**成功之后**写（`confirm` 之后、`doSettle` 落库之后、`audit` 更新之后、`verdict` 结算之后）。写在前面会在异常路径留下"通知已发但事情没做"的幻影 |
+| 两套常量 | `type`（`ORDER/CREDIT/MAINTAIN/SYSTEM`，决定标签分组）与 `bizType`（`ORDER/SETTLEMENT/ITEM`，决定跳转目标）**不许合并**。合成一个字段后要么标签错、要么跳转错 |
+| 权限 | 只能读写**自己**的消息；`userId` 从 `SecurityContextHolder` 取，不接受请求参数里的 userId；越权 → 3008 |
+| 幂等 | 单条已读重复标记不报错、不重复扣减未读数 |
+| 查询 | 未读数复用 `idx_msg_user_read(user_id, is_read, created_at)`（覆盖未读数与列表两种查询，不额外建索引）；列表按 `created_at DESC, id DESC` |
+| 实时性 | 不做推送（无 WebSocket / SSE）。铃铛在路由切换时刷新未读数即可，答辩演示也不需要秒级到达 |
+| 禁止 | 在业务外自己 `messageMapper.insert`；为通知加事务传播或异步线程池；把消息当审计日志用（审计看 `credit_log`/`fee_flow`/`loss_log`） |
 ---
 
 ## 9. 配置外置规范（**不许硬编码**）
@@ -1023,3 +1036,4 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-20 | 项目负责人 | **v1.18（归还申请：承租方申报 + 出租方验收 + 超时兜底，方案 B）**：①§8.5 新增「三之二 归还申请」——承租方 `POST /api/orders/{id}/return/request` 只写 `return_requested_at/by/state` 三列且**订单状态不变**、占用不释放；出租方验收以其成色结算；超过 `order.return.confirm.hours`（默认 24h）按承租方申报成色自动结算；超时扫描**每单一个独立事务**（`TransactionTemplate`），一单失败只记日志；出租方确认与自动结算共用 `doSettle(order, returnState, remark)`，金额只算一次。②异议权限由「仅承租方」放宽为「订单双方」（`requireParty`），`canConfirm` 仍只对承租方为真、`canDispute` 对双方为真。③`rental_order` 加三列 + `idx_order_return_request(status, return_requested_at)`；`sys_config` 加 `order.return.confirm.hours=24`；`03-verify.sql` 加 **A24**（PENDING/CONFIRMED 不得有申报时间、有申报必须有合法成色），实库 24 项全 PASS。④测试 111 → **117/117**（新增 6 例：申报落库且状态不变 / 出租方不能申报 3008 / 重复申报 3001 / 验收覆盖申报值 / 超时按申报成色自动结算 / 出租方可提异议）。⑤动机：堵住「承租方已归还、出租方拖着不确认」的单边死角（原来卡在 IN_USE、占用不释放、连申诉入口都没有） |
 | 2026-11-20 | 项目负责人 | **v1.19（裁决四档）**：新增 **§8.6 裁决规范**：申诉裁决由布尔 `accepted` 改为四档 `VerdictType`（`RENTER_WIN` / `OWNER_WIN` / `PARTIAL` / `REJECTED`），禁用布尔、金额变动必须追加 `ADJUST` 冲正流水、物品损耗按比例回滚、信誉用 `ADMIN_ADJUST` 回滚不改历史；`appeal.verdict_type`、`fee_flow.type` 加 `ADJUST`；测试 117 → 124、DB 断言 24 → 25（A25）；动机=双方都能申诉，"支持"方向相反，出租方胜诉时原逻辑把损耗费清零 |
 | 2026-11-23 | 项目负责人 | **v1.20（切片 6：推荐 + 看板 + 参数配置）**：新增 **§8.7 推荐与统计规范**（权重只读 `sys_config`、`reason` 只在后端拼、候选上限 200 与排除规则、排序稳定、冷启动分支不许删、GMV 口径不含押金、策略表只提交改动字段、配置不缓存故保存即生效、禁止假数据）；版本行从 v1.18 补正为 v1.20（v1.19 已落地但版本行漏改）；实测 142/142、33 条接口联调断言、两端 build 通过 |
+| 2026-11-23 | 新增 **§8.8 消息通知规范**（业务侧只调 `notify`、失败只 warn 不阻断、只在状态变更成功后写、`type` 与 `bizType` 两组常量不许合并、只能读写自己的消息、单条已读幂等、未读数复用 `idx_msg_user_read`、不做实时推送）+ 版本升 v1.21：站内消息落地（订单创建/确认/取用/取消、归还申报/结算生成/异议、审核结果、裁决结果共 9 处通知），测试 142 → 149，接口 44 → 48 |

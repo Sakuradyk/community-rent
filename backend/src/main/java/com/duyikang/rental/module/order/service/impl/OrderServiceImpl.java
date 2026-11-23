@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.duyikang.rental.common.constant.ErrorCode;
 import com.duyikang.rental.common.constant.ItemStatus;
+import com.duyikang.rental.common.constant.MessageType;
 import com.duyikang.rental.common.constant.OrderStatus;
 import com.duyikang.rental.common.exception.BizException;
 import com.duyikang.rental.common.lock.RedisLock;
@@ -21,6 +22,7 @@ import com.duyikang.rental.module.order.entity.RentalOrder;
 import com.duyikang.rental.module.order.mapper.OrderOccupancyMapper;
 import com.duyikang.rental.module.order.mapper.RentalOrderMapper;
 import com.duyikang.rental.module.order.service.OrderService;
+import com.duyikang.rental.module.message.service.MessageService;
 import com.duyikang.rental.module.order.service.OrderTxService;
 import com.duyikang.rental.module.order.vo.OrderCreatedVO;
 import com.duyikang.rental.module.order.vo.OrderDetailVO;
@@ -96,6 +98,7 @@ public class OrderServiceImpl implements OrderService {
     private final SysConfigMapper sysConfigMapper;
     private final RedisLock redisLock;
     private final OrderTxService orderTxService;
+    private final MessageService messageService;
 
     // ------------------------------------------------------------------ 试算
 
@@ -160,6 +163,13 @@ public class OrderServiceImpl implements OrderService {
             RentalOrder saved = rentalOrderMapper.selectById(orderId);
             BigDecimal rentAmount = saved.getRentAmount() == null
                     ? rentAmount(item.getDailyPrice(), rentDays) : saved.getRentAmount();
+
+            // 通知出租方：有新申请待确认（旁路通知，失败不影响已成功的下单）
+            messageService.notify(item.getOwnerId(), MessageType.ORDER, "有新的租赁申请",
+                    "「" + saved.getOrderNo() + "」申请租用你发布的物品，时间 "
+                            + saved.getStartDate() + " 至 " + saved.getEndDate() + "，请及时确认。",
+                    MessageType.BIZ_ORDER, orderId);
+
             return new OrderCreatedVO(saved.getId(), saved.getOrderNo(), saved.getStatus(),
                     OrderStatus.labelOf(saved.getStatus()), saved.getStartDate(), saved.getEndDate(),
                     saved.getRentDays(), rentAmount, saved.getDeposit(), rentAmount.add(saved.getDeposit()));

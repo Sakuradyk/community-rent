@@ -3,6 +3,7 @@ package com.duyikang.rental.module.order.service.impl;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.duyikang.rental.common.constant.ErrorCode;
 import com.duyikang.rental.common.constant.ItemStatus;
+import com.duyikang.rental.common.constant.MessageType;
 import com.duyikang.rental.common.constant.OrderStatus;
 import com.duyikang.rental.common.exception.BizException;
 import com.duyikang.rental.module.credit.service.CreditService;
@@ -11,6 +12,7 @@ import com.duyikang.rental.module.item.mapper.ItemMapper;
 import com.duyikang.rental.module.order.dto.OrderCancelDTO;
 import com.duyikang.rental.module.order.entity.OrderOccupancy;
 import com.duyikang.rental.module.order.entity.RentalOrder;
+import com.duyikang.rental.module.message.service.MessageService;
 import com.duyikang.rental.module.order.mapper.OrderOccupancyMapper;
 import com.duyikang.rental.module.order.mapper.RentalOrderMapper;
 import com.duyikang.rental.module.order.service.OrderStateService;
@@ -52,6 +54,7 @@ public class OrderStateServiceImpl implements OrderStateService {
     private final OrderOccupancyMapper orderOccupancyMapper;
     private final ItemMapper itemMapper;
     private final CreditService creditService;
+    private final MessageService messageService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -66,6 +69,11 @@ public class OrderStateServiceImpl implements OrderStateService {
                 .eq(RentalOrder::getId, orderId)
                 .eq(RentalOrder::getStatus, OrderStatus.PENDING));
         requireChanged(rows, orderId, "确认", OrderStatus.PENDING);
+
+        // 通知承租方：订单已确认（旁路通知，失败不影响主流程）
+        messageService.notify(order.getRenterId(), MessageType.ORDER, "租赁申请已通过",
+                "「" + order.getOrderNo() + "」已被出租方确认，请按约定时间取用。",
+                MessageType.BIZ_ORDER, orderId);
 
         log.info("订单确认 orderId={} ownerId={}", orderId, user.userId());
     }
@@ -89,6 +97,10 @@ public class OrderStateServiceImpl implements OrderStateService {
                 .set(Item::getStatus, ItemStatus.RENTED)
                 .eq(Item::getId, order.getItemId())
                 .in(Item::getStatus, ItemStatus.ON_SHELF, ItemStatus.RENTED));
+
+        messageService.notify(order.getRenterId(), MessageType.ORDER, "物品已标记取用",
+                "「" + order.getOrderNo() + "」的出租方已标记取用，归还时请点「我已归还」申报成色。",
+                MessageType.BIZ_ORDER, orderId);
 
         log.info("订单取用 orderId={} itemId={} ownerId={}", orderId, order.getItemId(), user.userId());
     }
@@ -141,6 +153,13 @@ public class OrderStateServiceImpl implements OrderStateService {
                 .set(Item::getStatus, ItemStatus.ON_SHELF)
                 .eq(Item::getId, order.getItemId())
                 .eq(Item::getStatus, ItemStatus.RENTED));
+
+        // 通知另一方：取消是对等的动作，谁取消就通知谁对面
+        Long counterparty = user.userId().equals(order.getRenterId()) ? order.getOwnerId() : order.getRenterId();
+        String actor = "RENTER".equals(cancelBy) ? "承租方" : ("OWNER".equals(cancelBy) ? "出租方" : "管理员");
+        messageService.notify(counterparty, MessageType.ORDER, "订单已取消",
+                actor + "取消了「" + order.getOrderNo() + "」，原因：" + reason + "。该时段已重新开放。",
+                MessageType.BIZ_ORDER, orderId);
 
         log.info("订单取消 orderId={} by={} userId={} 释放占用={} 行 reason={}",
                 orderId, cancelBy, user.userId(), released, reason);

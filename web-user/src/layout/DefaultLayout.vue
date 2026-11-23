@@ -25,6 +25,17 @@
           <router-link to="/mine" class="nav-item">我的</router-link>
         </nav>
 
+        <router-link
+          v-if="userStore.isLogin"
+          :to="{ name: 'messages' }"
+          class="bell"
+          aria-label="站内消息"
+        >
+          <el-badge :value="unreadCount" :hidden="unreadCount === 0" :max="99">
+            <span class="bell-icon">✉</span>
+          </el-badge>
+        </router-link>
+
         <div class="account">
           <template v-if="userStore.isLogin">
             <router-link :to="{ name: 'mine' }" class="account-name">
@@ -53,13 +64,34 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { getUnreadCount } from '@/api/message'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
+
+/** 顶栏未读徽标；只在有登录态时拉取，退出登录清零 */
+const unreadCount = ref(0)
+
+async function refreshUnread() {
+  if (!userStore.isLogin) {
+    unreadCount.value = 0
+    return
+  }
+  try {
+    const data = await getUnreadCount()
+    unreadCount.value = data?.count ?? 0
+  } catch (e) {
+    // 未读数只是体验信息，失败静默（不打扰用户）
+  }
+}
+
+// 每次路由切换都刷新一次：读完消息返回列表时徽标能立刻变化
+watch(() => route.fullPath, refreshUnread)
 
 onMounted(async () => {
   // 有令牌就用真实接口校准一次资料（防止改了资料后本地缓存过期）
@@ -70,10 +102,12 @@ onMounted(async () => {
       // 401 类错误已由 request.js 统一清理并跳转，这里不再重复提示
     }
   }
+  await refreshUnread()
 })
 
 async function handleLogout() {
   await userStore.logout()
+  unreadCount.value = 0
   ElMessage.success('已退出登录')
   router.push({ name: 'home' })
 }
@@ -86,6 +120,22 @@ async function handleLogout() {
   display: flex;
   flex-direction: column;
   min-height: 100%;
+}
+
+.bell {
+  display: inline-flex;
+  align-items: center;
+  margin-right: $space-3;
+  color: $color-text-secondary;
+
+  &:hover {
+    color: $color-primary-deep;
+  }
+}
+
+.bell-icon {
+  font-size: 18px;
+  line-height: 1;
 }
 
 .layout-header {

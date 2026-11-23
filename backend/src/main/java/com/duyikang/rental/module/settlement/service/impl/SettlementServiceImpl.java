@@ -3,6 +3,7 @@ package com.duyikang.rental.module.settlement.service.impl;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.duyikang.rental.common.constant.ErrorCode;
 import com.duyikang.rental.common.constant.OrderStatus;
+import com.duyikang.rental.common.constant.MessageType;
 import com.duyikang.rental.common.constant.ReturnState;
 import com.duyikang.rental.common.constant.SettlementStatus;
 import com.duyikang.rental.common.exception.BizException;
@@ -16,6 +17,7 @@ import com.duyikang.rental.module.loss.mapper.LossLogMapper;
 import com.duyikang.rental.module.loss.service.LossService;
 import com.duyikang.rental.module.order.entity.OrderOccupancy;
 import com.duyikang.rental.module.order.entity.RentalOrder;
+import com.duyikang.rental.module.message.service.MessageService;
 import com.duyikang.rental.module.order.mapper.OrderOccupancyMapper;
 import com.duyikang.rental.module.order.mapper.RentalOrderMapper;
 import com.duyikang.rental.module.settlement.calc.FeeCalculator;
@@ -102,6 +104,7 @@ public class SettlementServiceImpl implements SettlementService {
      * 所以这里用编程式事务（TransactionTemplate），而不是在方法上挂 @Transactional。
      */
     private final PlatformTransactionManager transactionManager;
+    private final MessageService messageService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -146,6 +149,11 @@ public class SettlementServiceImpl implements SettlementService {
         }
         // 状态保持 IN_USE / OVERDUE：物品还在承租方手上，不能提前释放占用
         rentalOrderMapper.updateById(patch);
+        messageService.notify(order.getOwnerId(), MessageType.ORDER, "承租方申报归还，请验收",
+                "「" + order.getOrderNo() + "」承租方申报成色为 " + ReturnState.labelOf(dto.returnState())
+                        + "，请在 " + returnConfirmHours() + " 小时内验收确认，超时将按申报自动结算。",
+                MessageType.BIZ_ORDER, order.getId());
+
         log.info("订单 {} 承租方发起归还申请（申报状态 {}），出租方需在 {} 小时内确认",
                 order.getOrderNo(), dto.returnState(), returnConfirmHours());
     }
@@ -247,6 +255,12 @@ public class SettlementServiceImpl implements SettlementService {
 
         applyCredit(order, overdueDays, returnState);
 
+        messageService.notify(order.getRenterId(), MessageType.ORDER, "结算单已生成，请确认",
+                "「" + order.getOrderNo() + "」已结算：逾期费 " + overdueFee.toPlainString()
+                        + " 元、损耗费 " + loss.lossFee().toPlainString() + " 元、应退 " + refund.toPlainString()
+                        + " 元。请在冷静期内点「无异议」或「提异议」。",
+                MessageType.BIZ_SETTLEMENT, order.getId());
+
         log.info("订单 {} 归还完成：逾期 {} 天，逾期费 {}，损耗值 {}，损耗费 {}，应退 {}",
                 order.getOrderNo(), overdueDays, overdueFee, loss.weight(), loss.lossFee(), refund);
         return buildDetail(settlement, order, returnState,
@@ -329,6 +343,13 @@ public class SettlementServiceImpl implements SettlementService {
         appeal.setCreatedAt(now);
         appeal.setUpdateTime(now);
         appealMapper.insert(appeal);
+        // 通知另一方（提异议的对立面）去关注这单争议
+        Long counterparty = appeal.getApplicantId().equals(order.getRenterId())
+                ? order.getOwnerId() : order.getRenterId();
+        messageService.notify(counterparty, MessageType.ORDER, "结算单被提出异议",
+                "「" + order.getOrderNo() + "」的结算单已被对方提出异议，管理员裁决后会通知你结果。",
+                MessageType.BIZ_SETTLEMENT, order.getId());
+
         log.info("结算单 {} 被提出异议（申请人 userId={}），已生成申诉 appealId={}",
                 settlement.getSettleNo(), appeal.getApplicantId(), appeal.getId());
     }

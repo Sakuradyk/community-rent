@@ -86,6 +86,11 @@ const routes = [
         name: 'credits',
         component: () => import('@/views/credit/CreditView.vue'),
         meta: { title: '我的信誉', requiresAuth: true }
+      },      {
+        path: 'messages',
+        name: 'messages',
+        component: () => import('@/views/message/MessageView.vue'),
+        meta: { title: '站内消息', requiresAuth: true }
       },
       {
         path: 'mine',

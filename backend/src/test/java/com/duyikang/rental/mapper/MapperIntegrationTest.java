@@ -115,7 +115,8 @@ class MapperIntegrationTest {
         // （"0 行"和"表名/字段名写错"是两回事，用不存在的主键查才既有意义又不随真实数据变化）
         assertThat(appealMapper.selectCount(Wrappers.<com.duyikang.rental.module.appeal.entity.Appeal>lambdaQuery()
                 .eq(com.duyikang.rental.module.appeal.entity.Appeal::getOrderId, -1L))).isZero();
-        assertThat(messageMapper.selectCount(null)).isEqualTo(2L);
+        // 消息会随真实下单/审核继续增长，只能断言「不低于种子」（坑 53：别锁用户造得出来的行数）
+        assertThat(messageMapper.selectCount(null)).isGreaterThanOrEqualTo(2L);
         assertThat(creditPolicyMapper.selectCount(null)).isEqualTo(1L);
         assertThat(feePolicyMapper.selectCount(null)).isEqualTo(1L);
         assertThat(lossPolicyMapper.selectCount(null)).isEqualTo(1L);

@@ -3,6 +3,7 @@ package com.duyikang.rental.module.appeal.service.impl;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.duyikang.rental.common.constant.ErrorCode;
+import com.duyikang.rental.common.constant.MessageType;
 import com.duyikang.rental.common.constant.ItemStatus;
 import com.duyikang.rental.common.constant.SettlementStatus;
 import com.duyikang.rental.common.constant.VerdictType;
@@ -16,6 +17,7 @@ import com.duyikang.rental.module.appeal.vo.AppealItemVO;
 import com.duyikang.rental.module.credit.entity.CreditLog;
 import com.duyikang.rental.module.credit.mapper.CreditLogMapper;
 import com.duyikang.rental.module.credit.service.CreditService;
+import com.duyikang.rental.module.message.service.MessageService;
 import com.duyikang.rental.module.item.entity.Item;
 import com.duyikang.rental.module.item.mapper.ItemMapper;
 import com.duyikang.rental.module.loss.entity.LossLog;
@@ -114,6 +116,7 @@ public class AppealServiceImpl implements AppealService {
     private final CreditLogMapper creditLogMapper;
 
     private final CreditService creditService;
+    private final MessageService messageService;
 
     @Override
     public PageResult<AppealItemVO> page(String status, Integer pageNum, Integer pageSize) {
@@ -267,6 +270,12 @@ public class AppealServiceImpl implements AppealService {
                         "管理员裁决调整：" + dto.verdict());
             }
         }
+
+        messageService.notify(appeal.getApplicantId(), MessageType.ORDER, "申诉已裁决",
+                "你的申诉已裁决：" + VerdictType.labelOf(type) + "。损耗费 "
+                        + originalLossFee.toPlainString() + " → " + newLossFee.toPlainString()
+                        + "，应退 " + originalRefund.toPlainString() + " → " + newRefund.toPlainString() + "。",
+                MessageType.BIZ_SETTLEMENT, appeal.getOrderId());
 
         log.info("申诉 {} 裁决完成：{}，结算单 {} 转 {}，损耗费 {} → {}，应退 {} → {}",
                 appeal.getId(), type, settlement.getSettleNo(), newStatus,

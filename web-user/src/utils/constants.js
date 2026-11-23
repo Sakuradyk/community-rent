@@ -155,3 +155,20 @@ export function groupCategories(categories) {
     children: list.filter((c) => c.level === 2 && c.parentId === parent.id)
   }))
 }
+/**
+ * 站内消息类型字典（与后端 MessageType 一一对应）。
+ * 只管展示分组，跳转目标由消息自带的 bizType 决定 —— 两组含义不同，别合并。
+ */
+export const MESSAGE_TYPE = {
+  ORDER: { label: '订单', tag: 'primary', color: '#1d4ed8' },
+  CREDIT: { label: '信誉', tag: 'warning', color: '#b45309' },
+  MAINTAIN: { label: '检修', tag: 'info', color: '#7a6a5d' },
+  SYSTEM: { label: '系统', tag: 'info', color: '#57534e' }
+}
+
+/** 消息业务类型 → 详情页路由名（用于点击跳转） */
+export const BIZ_ROUTE = {
+  ORDER: 'order-detail',
+  SETTLEMENT: 'settlement',
+  ITEM: 'item-detail'
+}
