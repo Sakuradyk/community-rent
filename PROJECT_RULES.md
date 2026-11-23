@@ -12,7 +12,7 @@
 >
 > **效力**：四者冲突时按此顺序裁决——**说明书 > 需求总结 > 本文件 > AI 习惯**。本文件优先级高于 AI 的默认习惯，低于 `社区物品租用平台-需求总结.md`（需求口径）。
 >
-> **版本**：v1.22 · 2026-11-23 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
+> **版本**：v1.23 · 2026-11-23 · 配套说明书 385 行版、需求总结 v1.0、`docs/AI协作开发手册.md` v2.0
 
 ---
 
@@ -824,6 +824,40 @@ int rows = rentalOrderMapper.update(null, Wrappers.<RentalOrder>lambdaUpdate()
 | 禁止 | 在业务外自己 `messageMapper.insert`；为通知加事务传播或异步线程池；把消息当审计日志用（审计看 `credit_log`/`fee_flow`/`loss_log`） |
 ---
 
+### 8.9 账务规范（虚拟钱包，**每笔业务必须借贷守恒**）
+
+**账户模型**
+
+- 主体两类：每个用户一个 `USER` 账户（**懒创建**，首次记账时 `INSERT ... ON DUPLICATE KEY` 兜 `uk_account`）；全站一个 `PLATFORM` 账户（`owner_id = 0`）。
+- 两个余额：`cash_balance`（可用）、`frozen_balance`（在途冻结）。**余额只能由分录推导出来**，禁止直接 `UPDATE account SET cash_balance = 999`（管理端调整也必须走 §8.5 的分录接口）。
+
+**记账铁律**
+
+| 编号 | 规则 |
+| :-- | :-- |
+| M1 | **复式**：每个业务动作写**成对**分录（`from_account_id` 减、`to_account_id` 加），金额为正数，方向由 from/to 表达 |
+| M2 | **守恒**：同一 `(biz_type, biz_id)` 下所有分录的金额之和为 0；实现后必须能跑 `GET /api/admin/accounts/reconcile` 验证 |
+| M3 | **幂等**：`uk_entry_biz(biz_type, biz_id, action, from, to)` 兜重入；冲突视为"已记过"，不重算余额、不报错 |
+| M4 | **同事务**：记账与业务状态变更在**同一个事务**里；金额算好再写，先改业务再补账会导致"结算成功但钱没动" |
+| M5 | **快照**：冻结与划转一律用订单上的价格快照（`rent_amount` / `deposit_amount` / `overdue_fee` / `loss_fee`），**不许**回头查 `item.daily_price` |
+| M6 | **乐观锁**：改账户必须带 `version`，`UPDATE ... WHERE id = ? AND version = ?`，`rows = 0` 重试 3 次后报 5000；禁止无锁覆盖 |
+| M7 | **不删除**：`account_entry` 只追加；错了用反向分录冲正（`VERDICT` / `ADMIN_ADJUST`），与本项目 `fee_flow` 的「只追加不改写」一致 |
+| M8 | **精度**：金额 `BigDecimal` + `DECIMAL(12,2)`，中间计算 `HALF_UP` 保留 2 位；**余额判定用 `compareTo`**，不写 `equals` |
+| M9 | **权限**：用户只能读自己的账户与流水；`userId` 一律从 `SecurityContext` 取，禁止接受请求参数 |
+| M10 | **状态机不动**：账务是状态机的**副作用**，不许为了"钱到账"新增订单状态（六状态仍为唯一真源） |
+
+**资金流向（写代码时逐行对照）**
+
+| 业务 | 分录 |
+| :-- | :-- |
+| 注册 | `PLATFORM → USER`，`amount = wallet.signup.balance`，`biz_type = SIGNUP` |
+| 下单（`PENDING`） | `USER.cash → USER.frozen`，`amount = rent_amount + deposit_amount`，`biz_type = ORDER_FREEZE` |
+| 取消（`PENDING`/`CONFIRMED`） | `USER.frozen → USER.cash`，同额反向，`biz_type = ORDER_RELEASE` |
+| 结算 | `USER.frozen → USER.cash`（应退 D−O−L）、`USER.frozen → OWNER.cash`（R+O）、`USER.frozen → PLATFORM`（L），三条同 `biz_type = SETTLE`、同 `biz_id = settlementId` |
+| 裁决冲正 | 按 Δ 反向补一条，`biz_type = VERDICT` |
+| 管理端调整 | `USER ↔ PLATFORM`，`biz_type = ADMIN_ADJUST` |
+
+**禁止项**：①前端传金额或余额 ②先扣钱后建单（两张表不同事务）③用 `fee_flow` 代替分录 ④在 `account_entry` 上做物理删除 ⑤把虚拟余额当作真实资金对外承诺（充值/提现一律不做，见需求总结 §10.2）
 ## 9. 配置外置规范（**不许硬编码**）
 
 以下数值**必须**从配置表或 `application.yml` 读取，**禁止**在 Java 代码里出现字面量：
@@ -1038,3 +1072,4 @@ test(credit): 补齐日加分封顶与 0 分下限用例
 | 2026-11-23 | 项目负责人 | **v1.20（切片 6：推荐 + 看板 + 参数配置）**：新增 **§8.7 推荐与统计规范**（权重只读 `sys_config`、`reason` 只在后端拼、候选上限 200 与排除规则、排序稳定、冷启动分支不许删、GMV 口径不含押金、策略表只提交改动字段、配置不缓存故保存即生效、禁止假数据）；版本行从 v1.18 补正为 v1.20（v1.19 已落地但版本行漏改）；实测 142/142、33 条接口联调断言、两端 build 通过 |
 | 2026-11-23 | 新增 **§8.8 消息通知规范**（业务侧只调 `notify`、失败只 warn 不阻断、只在状态变更成功后写、`type` 与 `bizType` 两组常量不许合并、只能读写自己的消息、单条已读幂等、未读数复用 `idx_msg_user_read`、不做实时推送）+ 版本升 v1.21：站内消息落地（订单创建/确认/取用/取消、归还申报/结算生成/异议、审核结果、裁决结果共 9 处通知），测试 142 → 149，接口 44 → 48 |
 | 2026-11-23 | 项目负责人 | **v1.22（证据固化 + K6 可视化）**：§15 索引更新——`docs/测试用例.md` 由「边开发边填」升级为**验收证据中心**（三条硬指标→证据位置、K2 并发断言口径与复现命令、按用户动作排列的 8 组用例、推荐四组消融结果、12 步答辩演示脚本、提交前回归清单），`docs/数据库设计.md` 表数保持 19（核对后未变），`docs/notes` 注明 M5 评估笔记；配套实绩：K2 并发证据固化（149/149 + 50 线程的结果、口径、命令进文档）、首页/卡片「同小区」徽标（纯展示，排序仍由后端 SQL 决定）、K6 损耗可视化（物品详情损耗进度条 + 0.6/0.85 两条阈值说明 + 我的物品列表损耗列，`MyItemVO` 增 `lossValue`） |
+| 2026-11-23 | 项目负责人 | **v1.23（账务）**：新增 §8.9 账务规范——账户模型（USER 懒创建 / PLATFORM 固定 `owner_id=0`）、两个余额、十条记账铁律（复式 M1、守恒 M2、幂等 M3、同事务 M4、快照 M5、乐观锁 M6、只追加 M7、精度 M8、权限 M9、状态机不动 M10）、资金流向表（注册/下单/取消/结算/裁决/调整）、五条禁止项。配套：需求总结 §4.3 增 FR-M3-10~13、§5 增 `wallet.signup.balance`、§7.1 增两张表、§10.1/§10.2 边界与偏差备案；接口文档 §8（6 个接口，48 → 54）；数据库设计 19 → 21 表 + §3.8 + §7 取舍 11 |
