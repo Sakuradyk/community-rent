@@ -10,6 +10,10 @@ import com.duyikang.rental.module.order.mapper.OrderOccupancyMapper;
 import com.duyikang.rental.module.order.mapper.RentalOrderMapper;
 import com.duyikang.rental.module.order.service.OrderService;
 import com.duyikang.rental.module.order.vo.OrderCreatedVO;
+import com.duyikang.rental.module.wallet.entity.Account;
+import com.duyikang.rental.module.wallet.entity.AccountEntry;
+import com.duyikang.rental.module.wallet.mapper.AccountEntryMapper;
+import com.duyikang.rental.module.wallet.mapper.AccountMapper;
 import com.duyikang.rental.security.LoginUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +25,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Queue;
@@ -55,8 +60,16 @@ class OrderConcurrencyTest {
     private RentalOrderMapper rentalOrderMapper;
     @Autowired
     private OrderOccupancyMapper orderOccupancyMapper;
+    @Autowired
+    private AccountMapper accountMapper;
+    @Autowired
+    private AccountEntryMapper accountEntryMapper;
 
     private Long maxOrderIdBefore;
+    /** 下单会冻结「租金 + 押金」，压测用的那 1 单是真实提交的，收尾必须把余额退回原值。 */
+    private Long renterAccountId;
+    private BigDecimal cashBefore;
+    private BigDecimal frozenBefore;
     private LocalDate start;
     private LocalDate end;
 
@@ -67,18 +80,48 @@ class OrderConcurrencyTest {
         maxOrderIdBefore = latest.isEmpty() ? 0L : latest.get(0).getId();
         start = LocalDate.now().plusDays(40);
         end = start.plusDays(3);
+
+        Account account = accountMapper.selectOne(Wrappers.<Account>lambdaQuery()
+                .eq(Account::getOwnerType, "USER")
+                .eq(Account::getOwnerId, RENTER_ID));
+        renterAccountId = account == null ? null : account.getId();
+        cashBefore = account == null ? null : account.getCashBalance();
+        frozenBefore = account == null ? null : account.getFrozenBalance();
     }
 
     @AfterEach
     void cleanUp() {
+        List<Long> leakedOrderIds = rentalOrderMapper.selectList(Wrappers.<RentalOrder>lambdaQuery()
+                        .eq(RentalOrder::getItemId, ITEM_ID)
+                        .gt(RentalOrder::getId, maxOrderIdBefore))
+                .stream().map(RentalOrder::getId).toList();
+
         // 先删占用再删订单（没有物理外键，顺序只是习惯）
         orderOccupancyMapper.delete(Wrappers.<OrderOccupancy>lambdaQuery()
                 .eq(OrderOccupancy::getItemId, ITEM_ID)
                 .ge(OrderOccupancy::getOccupyDate, start)
                 .lt(OrderOccupancy::getOccupyDate, end));
+
+        // 冻结分录必须一起删：只删订单会留下永远解不开的冻结（2026-11-24 连跑 4 次攒了 116.00，被 A29 抓到）
+        if (!leakedOrderIds.isEmpty()) {
+            accountEntryMapper.delete(Wrappers.<AccountEntry>lambdaQuery()
+                    .in(AccountEntry::getBizType, "ORDER_FREEZE", "ORDER_RELEASE")
+                    .in(AccountEntry::getBizId, leakedOrderIds));
+        }
+
         rentalOrderMapper.delete(Wrappers.<RentalOrder>lambdaQuery()
                 .eq(RentalOrder::getItemId, ITEM_ID)
                 .gt(RentalOrder::getId, maxOrderIdBefore));
+
+        // 分录删干净后，账户余额必须同步退回测试前的快照，否则 A28（回放）与 A29（冻结对账）都会红
+        if (renterAccountId != null && cashBefore != null) {
+            Account patch = new Account();
+            patch.setId(renterAccountId);
+            patch.setCashBalance(cashBefore);
+            patch.setFrozenBalance(frozenBefore);
+            accountMapper.updateById(patch);
+        }
+
         SecurityContextHolder.clearContext();
     }
 

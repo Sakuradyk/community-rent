@@ -15,6 +15,10 @@ import com.duyikang.rental.module.item.service.ItemService;
 import com.duyikang.rental.module.item.vo.CalendarVO;
 import com.duyikang.rental.module.item.vo.ItemCardVO;
 import com.duyikang.rental.module.item.vo.ItemDetailVO;
+import com.duyikang.rental.module.order.entity.OrderOccupancy;
+import com.duyikang.rental.module.order.entity.RentalOrder;
+import com.duyikang.rental.module.order.mapper.OrderOccupancyMapper;
+import com.duyikang.rental.module.order.mapper.RentalOrderMapper;
 import com.duyikang.rental.security.LoginUser;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.junit.jupiter.api.AfterEach;
@@ -61,6 +65,8 @@ class ItemIntegrationTest {
     @Autowired private ItemAdminService itemAdminService;
     @Autowired private ItemMapper itemMapper;
     @Autowired private ItemImageMapper itemImageMapper;
+    @Autowired private RentalOrderMapper rentalOrderMapper;
+    @Autowired private OrderOccupancyMapper orderOccupancyMapper;
 
     @AfterEach
     void clearContext() {
@@ -193,10 +199,14 @@ class ItemIntegrationTest {
     }
 
     @Test
-    @DisplayName("下架：有进行中订单（物品 2 有 CONFIRMED 单）→ 3003")
+    @DisplayName("下架：有进行中订单 → 3003")
     void shelf_offShelfWithActiveOrder_throwsStatusInvalid() {
+        // 自造数据：原先借「种子物品 2 有 CONFIRMED 单」的假设，一旦那单被结算/取消就红（2026-11-24 已发生）
+        Long itemId = createOnShelfItem(2L, "张伟");
+        seedOccupiedOrder(itemId, 2L, "CONFIRMED", LocalDate.now().plusDays(5), 3);
+
         loginAs(2L, "张伟", "USER");
-        assertThatThrownBy(() -> itemService.shelf(2L, new ItemShelfDTO(false)))
+        assertThatThrownBy(() -> itemService.shelf(itemId, new ItemShelfDTO(false)))
                 .isInstanceOfSatisfying(BizException.class,
                         e -> assertThat(e.getCode()).isEqualTo(ErrorCode.ITEM_STATUS_INVALID.getCode()));
     }
@@ -289,11 +299,15 @@ class ItemIntegrationTest {
     @Test
     @DisplayName("日历：占用日与订单占用逐日一致，整月补齐可租日")
     void calendar_occupiedDatesMatchOccupancy() {
-        CalendarVO calendar = itemService.calendar(2L, "2026-11");
+        // 自造数据：占用固定落在 2026-11，且与种子物品的占用互不干扰
+        Long itemId = createOnShelfItem(2L, "张伟");
+        seedOccupiedOrder(itemId, 2L, "CONFIRMED", LocalDate.of(2026, 11, 10), 3);
 
-        assertThat(calendar.occupiedDates()).containsExactly("2026-11-20", "2026-11-21", "2026-11-22");
+        CalendarVO calendar = itemService.calendar(itemId, "2026-11");
+
+        assertThat(calendar.occupiedDates()).containsExactly("2026-11-10", "2026-11-11", "2026-11-12");
         assertThat(calendar.availableDates()).hasSize(30 - 3);
-        assertThat(calendar.availableDates()).contains("2026-11-01").doesNotContain("2026-11-20");
+        assertThat(calendar.availableDates()).contains("2026-11-01").doesNotContain("2026-11-10");
     }
 
     @Test
@@ -409,6 +423,45 @@ class ItemIntegrationTest {
     private ItemSaveDTO saveDTO(List<String> urls) {
         return new ItemSaveDTO("测试帐篷", LEAF_CATEGORY_ID, "九成新，带地钉", COMMUNITY_ID,
                 VALID_DAILY_PRICE, VALID_DEPOSIT, VALID_OVERDUE_RATE, urls);
+    }
+
+    /** 造一件已审核通过（ON_SHELF）的物品并返回 id。 */
+    private Long createOnShelfItem(long ownerId, String nickname) {
+        Long itemId = createPendingItem(ownerId, nickname);
+        loginAs(1L, "平台管理员", "ADMIN");
+        itemAdminService.audit(itemId, new ItemAuditDTO(true, null));
+        return itemId;
+    }
+
+    /**
+     * 直接插一笔订单并逐日占用 start..start+days（不含 end），返回订单 id。
+     *
+     * <p>为什么直插而不过接口：这些用例只想验证「占用存在时物品/日历怎么表现」，
+     * 走下单接口会额外引入余额冻结、并发锁等与本题无关的前置条件。</p>
+     */
+    private Long seedOccupiedOrder(Long itemId, long ownerId, String status, LocalDate start, int days) {
+        RentalOrder order = new RentalOrder();
+        order.setOrderNo("T" + System.nanoTime());
+        order.setItemId(itemId);
+        order.setOwnerId(ownerId);
+        order.setRenterId(3L);
+        order.setStartDate(start);
+        order.setEndDate(start.plusDays(days));
+        order.setRentDays(days);
+        order.setStatus(status);
+        order.setDailyPrice(VALID_DAILY_PRICE);
+        order.setDeposit(VALID_DEPOSIT);
+        order.setOverdueRate(VALID_OVERDUE_RATE);
+        order.setRentAmount(VALID_DAILY_PRICE.multiply(BigDecimal.valueOf(days)));
+        rentalOrderMapper.insert(order);
+        for (LocalDate day = start; day.isBefore(start.plusDays(days)); day = day.plusDays(1)) {
+            OrderOccupancy occupancy = new OrderOccupancy();
+            occupancy.setItemId(itemId);
+            occupancy.setOrderId(order.getId());
+            occupancy.setOccupyDate(day);
+            orderOccupancyMapper.insert(occupancy);
+        }
+        return order.getId();
     }
 
     /** 生成符合 /uploads/{yyyyMM}/{32 位 hex}.{ext} 的地址（校验正则与 FileStorageUtil 一致）。 */

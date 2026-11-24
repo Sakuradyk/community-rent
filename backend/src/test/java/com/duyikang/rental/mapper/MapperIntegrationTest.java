@@ -39,6 +39,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -106,7 +107,12 @@ class MapperIntegrationTest {
         // 订单与占用同样会随真实使用增长（用户在浏览器里下单），只校验「3 笔种子订单都在」
         assertThat(rentalOrderMapper.selectCount(new QueryWrapper<com.duyikang.rental.module.order.entity.RentalOrder>()
                 .in("order_no", List.of("R202610050001", "R202611200001", "R202611250001")))).isEqualTo(3L);
-        assertThat(orderOccupancyMapper.selectCount(null)).isGreaterThanOrEqualTo(3L);
+        // 占用行数不能写死：用户在浏览器里确认/取消/结算会真实增删占用（2026-11-24 订单 2 被结算后，
+        // 库里只剩 2 行，硬编码 >= 3 直接失败）。改为校验**不变式**——占用行数 == 所有在途订单的租期天数之和。
+        long openDays = rentalOrderMapper.selectList(new QueryWrapper<com.duyikang.rental.module.order.entity.RentalOrder>()
+                        .in("status", List.of("PENDING", "CONFIRMED", "IN_USE", "OVERDUE")))
+                .stream().mapToLong(o -> o.getRentDays() == null ? 0L : o.getRentDays()).sum();
+        assertThat(orderOccupancyMapper.selectCount(null)).isEqualTo(openDays);
         // 结算/流水/信誉/损耗/申诉同样会随真实使用增长（用户在浏览器里归还、提请异议），这里只锁「种子那一单」在
         assertThat(settlementMapper.selectCount(new QueryWrapper<com.duyikang.rental.module.settlement.entity.Settlement>()
                 .likeRight("settle_no", "S20261008"))).isEqualTo(1L);
@@ -183,31 +189,77 @@ class MapperIntegrationTest {
     @Test
     @DisplayName("占用表_按物品查询_逐日展开为三天")
     void occupancy_byItem_expandedPerDay() {
+        // 不借种子订单 2 的占用：用户在浏览器里确认/结算会真实改写它的状态与占用（2026-11-24 已发生），
+        // 断言写死「item 2 有 3 行」迟早过期。这里自造一笔订单 + 三天占用，测完随事务回滚。
+        RentalOrder order = seedOrder(4L, LocalDate.of(2027, 3, 1), 3);
+
         List<OrderOccupancy> rows = orderOccupancyMapper.selectList(
                 new QueryWrapper<OrderOccupancy>()
-                        .eq("item_id", 2L)
+                        .eq("item_id", 4L)
                         .orderByAsc("occupy_date"));
 
         assertThat(rows).hasSize(3);
         assertThat(rows).extracting(OrderOccupancy::getOccupyDate).containsExactly(
-                LocalDate.of(2026, 11, 20),
-                LocalDate.of(2026, 11, 21),
-                LocalDate.of(2026, 11, 22));
+                LocalDate.of(2027, 3, 1),
+                LocalDate.of(2027, 3, 2),
+                LocalDate.of(2027, 3, 3));
         // 三行同属一笔订单：若改成一单一行，唯一索引永远撞不上，K2 等于没有
-        assertThat(rows).extracting(OrderOccupancy::getOrderId).containsOnly(2L);
+        assertThat(rows).extracting(OrderOccupancy::getOrderId).containsOnly(order.getId());
     }
 
     @Test
     @DisplayName("重复写入同日占用_抛DuplicateKeyException")
     void insertDuplicateOccupancy_throwsDuplicateKey() {
+        LocalDate day = LocalDate.of(2027, 4, 1);
+        RentalOrder first = seedOrder(4L, day, 1);
+        // 第二笔只建订单、不建占用：让它去撞第一笔已经占住的同一天，才是"重复写入"的真实场景
+        RentalOrder second = seedOrderWithoutOccupancy(4L, day, 1);
+
         OrderOccupancy conflict = new OrderOccupancy();
-        conflict.setItemId(2L);
-        conflict.setOrderId(2L);
-        conflict.setOccupyDate(LocalDate.of(2026, 11, 20));
+        conflict.setItemId(4L);
+        conflict.setOrderId(second.getId());
+        conflict.setOccupyDate(day);
 
         assertThatThrownBy(() -> orderOccupancyMapper.insert(conflict))
                 .isInstanceOf(DuplicateKeyException.class)
                 .hasMessageContaining("uk_occupancy");
+        assertThat(first.getId()).isNotEqualTo(second.getId());
+    }
+
+    /** 造一笔 PENDING 订单并逐日占用 start..start+days，返回订单（不碰账户，纯占用口径）。 */
+    private RentalOrder seedOrder(Long itemId, LocalDate start, int days) {
+        RentalOrder order = insertOrder(itemId, start, days);
+        for (LocalDate d = start; d.isBefore(start.plusDays(days)); d = d.plusDays(1)) {
+            OrderOccupancy occupancy = new OrderOccupancy();
+            occupancy.setItemId(itemId);
+            occupancy.setOrderId(order.getId());
+            occupancy.setOccupyDate(d);
+            orderOccupancyMapper.insert(occupancy);
+        }
+        return order;
+    }
+
+    /** 只建订单、不建占用（用于构造"两笔订单抢同一天"的冲突场景）。 */
+    private RentalOrder seedOrderWithoutOccupancy(Long itemId, LocalDate start, int days) {
+        return insertOrder(itemId, start, days);
+    }
+
+    private RentalOrder insertOrder(Long itemId, LocalDate start, int days) {
+        RentalOrder order = new RentalOrder();
+        order.setOrderNo("MT" + System.nanoTime());
+        order.setItemId(itemId);
+        order.setOwnerId(3L);
+        order.setRenterId(2L);
+        order.setStartDate(start);
+        order.setEndDate(start.plusDays(days));
+        order.setRentDays(days);
+        order.setStatus("PENDING");
+        order.setDailyPrice(new BigDecimal("3.00"));
+        order.setDeposit(new BigDecimal("20.00"));
+        order.setOverdueRate(new BigDecimal("0.5000"));
+        order.setRentAmount(new BigDecimal("3.00").multiply(BigDecimal.valueOf(days)));
+        rentalOrderMapper.insert(order);
+        return order;
     }
 
     @Test

@@ -232,3 +232,23 @@ FROM (
 ) t
 WHERE ABS(t.cash_balance - t.calc_cash) >= 0.005
    OR ABS(t.frozen_balance - t.calc_frozen) >= 0.005;
+-- ----------------------------------------------------------------------------
+-- A29 冻结对账：每个用户的冻结余额必须等于其未完结订单的租金 + 押金之和
+--     未完结 = PENDING / CONFIRMED / IN_USE / OVERDUE（结算完、取消后冻结应为 0）
+--     这条抓的是「冻结悬空」：订单被删/钱没解冻时，A27 照样守恒、A28 照样能回放，
+--     只有账户的 frozen 与在途订单对不上（2026-11-23 张伟账户两笔 29.00 即此类）
+-- ----------------------------------------------------------------------------
+SELECT 'A29_frozen_matches_open_orders' AS check_item,
+       CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS result,
+       COUNT(*) AS mismatched_accounts
+FROM (
+    SELECT u.id AS uid,
+           COALESCE(a.frozen_balance, 0) AS frozen,
+           COALESCE((SELECT SUM(o.rent_amount + o.deposit)
+                       FROM `rental_order` o
+                      WHERE o.renter_id = u.id
+                        AND o.status IN ('PENDING', 'CONFIRMED', 'IN_USE', 'OVERDUE')), 0) AS expect
+    FROM `user` u
+    LEFT JOIN `account` a ON a.owner_type = 'USER' AND a.owner_id = u.id
+) t
+WHERE ABS(t.frozen - t.expect) >= 0.005;
